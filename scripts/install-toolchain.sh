@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
 #
-# install-toolchain.sh — the two tools this repository cannot be checked without.
+# install-toolchain.sh — the three tools this repository cannot be checked without.
 #
 #   bash scripts/install-toolchain.sh [--check] [--prefix DIR]
 #
@@ -26,6 +26,11 @@
 #     semantics. `zig = "latest"` in mise.toml was inherited from the template and
 #     is exactly wrong for a project whose central claim is a frozen ABI — a new
 #     Zig is free to change the build out from under the artefact.
+#   * `just` is not a mise registry package either, and — measured against the
+#     Ubuntu 24.04 GitHub runner image's own software list on 2026-09-20 — it is
+#     not on ubuntu-latest. The seam gate is `just seam-check`, so a workflow that
+#     assumes the runner has `just` fails at its first command; here it comes from
+#     a pinned release, with the tarball's SHA-256 checked before extraction.
 #
 # Everything is pinned, idempotent and checked: running it twice is a no-op, and
 # the versions are compared, not assumed. Numbers are the ones this repository was
@@ -38,6 +43,13 @@ set -euo pipefail
 
 ZIG_VERSION="0.16.0"
 IDRIS2_VERSION="0.7.0"
+JUST_VERSION="1.58.0"
+# The digest of just-1.58.0-x86_64-unknown-linux-musl.tar.gz as published on
+# 2026-08-03. It is committed here rather than fetched alongside the tarball: a
+# checksum downloaded from the same place as the thing it checks proves only that
+# the download was not corrupted on the way, which is worth something, but not
+# what "verified" should mean. Bump both together, in one commit.
+JUST_SHA256="4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -67,9 +79,14 @@ idris2_version() {
     have idris2 || return 0
     idris2 --version 2>/dev/null | sed -n 's/.*version \([0-9][0-9.]*\).*/\1/p' | head -1
 }
+just_version() {
+    have just || return 0
+    just --version 2>/dev/null | sed -n 's/^just \([0-9][0-9.]*\).*/\1/p' | head -1
+}
 
 ZIG_HAVE="$(zig_version)"
 IDRIS2_HAVE="$(idris2_version)"
+JUST_HAVE="$(just_version)"
 
 # ── Verify, rather than announce ─────────────────────────────────────────────
 # A toolchain script's job is that the tools WORK, not that they exist. A compiler
@@ -99,17 +116,19 @@ PROBE
 say "evil-weevil toolchain"
 say "  zig     want $ZIG_VERSION  have ${ZIG_HAVE:-none}"
 say "  idris2 want $IDRIS2_VERSION  have ${IDRIS2_HAVE:-none}"
+say "  just    want $JUST_VERSION  have ${JUST_HAVE:-none}"
 
 missing=0
 [ "$ZIG_HAVE" = "$ZIG_VERSION" ] || missing=$((missing + 1))
 [ "$IDRIS2_HAVE" = "$IDRIS2_VERSION" ] || missing=$((missing + 1))
+[ "$JUST_HAVE" = "$JUST_VERSION" ] || missing=$((missing + 1))
 
 if [ "$missing" -eq 0 ]; then
     if verify_idris2; then
         say ""
-        say "PASS: both tools present at the pinned versions, and idris2 compiles a"
-        say "      module that imports Data.Nat."
-        say "      (zig: $(command -v zig), idris2: $(command -v idris2))"
+        say "PASS: all three tools present at the pinned versions, and idris2 compiles"
+        say "      a module that imports Data.Nat."
+        say "      (zig: $(command -v zig), idris2: $(command -v idris2), just: $(command -v just))"
         exit 0
     fi
     say ""
@@ -124,6 +143,37 @@ if [ "$CHECK_ONLY" -eq 1 ]; then
     say "      Run: bash scripts/install-toolchain.sh   (or --prefix DIR to choose where)"
     exit 1
 fi
+
+# ── just ─────────────────────────────────────────────────────────────────────
+install_just() {
+    say ""
+    say "==> just $JUST_VERSION (the entry point to every gate)"
+    local bin="$PREFIX/bin/just"
+    local url="https://github.com/casey/just/releases/download/$JUST_VERSION/just-$JUST_VERSION-x86_64-unknown-linux-musl.tar.gz"
+    if [ -x "$bin" ] && [ "$("$bin" --version 2>/dev/null | sed -n 's/^just \([0-9][0-9.]*\).*/\1/p')" = "$JUST_VERSION" ]; then
+        say "    already installed at $bin"
+        return 0
+    fi
+    mkdir -p "$PREFIX/bin"
+    local tmp="$PREFIX/just-dl.tar.gz"
+    say "    downloading $url"
+    curl -fsSL -o "$tmp" "$url"
+    if ! echo "$JUST_SHA256  $tmp" | sha256sum -c - >/dev/null 2>&1; then
+        say "    FAIL: the tarball does not match the digest committed in this script."
+        say "          Expected $JUST_SHA256"
+        say "          Refusing to install it. If upstream really did re-release"
+        say "          $JUST_VERSION, bump JUST_VERSION and JUST_SHA256 together."
+        rm -f "$tmp"
+        return 1
+    fi
+    # Only the binary is installed. The release also ships a man page and shell
+    # completions; nothing here needs them, and a toolchain cache should hold what
+    # the gates run, not a distribution directory.
+    tar -xzf "$tmp" -C "$PREFIX/bin" just
+    chmod +x "$bin"
+    rm -f "$tmp"
+    say "    installed $("$bin" --version) at $bin (sha256 verified)"
+}
 
 # ── Zig ──────────────────────────────────────────────────────────────────────
 install_zig() {
@@ -190,6 +240,7 @@ install_idris2() {
     say "    installed $("$PREFIX/bin/idris2" --version | head -1) at $dir/bin/idris2"
 }
 
+[ "$JUST_HAVE" = "$JUST_VERSION" ] || install_just
 [ "$ZIG_HAVE" = "$ZIG_VERSION" ] || install_zig
 [ "$IDRIS2_HAVE" = "$IDRIS2_VERSION" ] || install_idris2
 
@@ -199,6 +250,12 @@ install_idris2() {
 # catches, and it is exactly the failure that a version string does not reveal.
 say ""
 say ""
+# The prefix is not on PATH yet — telling you to put it there is the next thing
+# this script does — so the verification below MUST reach for the tools it just
+# installed, not for whatever a shell happens to have. Without this line the
+# check reported "just: command not found" while exiting 0, which is the worst
+# shape a verification step can take.
+export PATH="$PREFIX/bin:$PATH"
 say "==> verifying the installed toolchain"
 if verify_idris2; then
     say "    idris2: compiles a module that imports Data.Nat"
@@ -209,6 +266,7 @@ else
     exit 1
 fi
 say "    zig:    $(zig version) at $(command -v zig)"
+say "    just:   $(just --version) at $(command -v just)"
 
 say "==================================================================="
 say "Add the toolchain to this shell:"
