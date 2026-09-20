@@ -38,7 +38,13 @@ repaired on 2026-09-20 (see the MANIFEST notes for what each one needed).
 |===
 | ID | Proof | Prover | File | Date | Verified By
 
-| — | No proofs completed yet | — | — | — | —
+| ABI-1 | Non-null pointers (`So (ptr /= 0)`) | Idris2 | `verification/proofs/idris2/ABI/Pointers.idr` | 2026-09-20 | `just proof-check-idris2` |
+| ABI-2 | Memory layout correctness (`HasSize`, `HasAlignment`) | Idris2 | `verification/proofs/idris2/ABI/Layout.idr` | 2026-09-20 | `just proof-check-idris2` |
+| ABI-3 | Platform type size proofs, per platform | Idris2 | `verification/proofs/idris2/ABI/Platform.idr` | 2026-09-20 | `just proof-check-idris2` |
+| ABI-4 | FFI function return types | Idris2 | `verification/proofs/idris2/ABI/Foreign.idr` | 2026-09-20 | `just proof-check-idris2` |
+| ABI-5 | C ABI compliance (`CABICompliant`, `FieldsAligned`) | Idris2 | `verification/proofs/idris2/ABI/Compliance.idr` | 2026-09-20 | `just proof-check-idris2` |
+| ABI-6 | The seam: the seven structs' offsets, sizes and alignment, checked against the generated header | Idris2 | `src/interface/Abi/Layout.idr` | 2026-09-20 | `just abi-check`, `just seam-check` |
+| ABI-7 | The rules: v0's five branches, perception memory (TTL, freshness, forgetting) and the utility graph's agreement with BOTH | Idris2 | `src/interface/Abi/{Foreign,Memory,Utility}.idr` | 2026-09-20 | `just proof-check-idris2`, plus the three pinned digests in both null hosts |
 |===
 
 == Proofs In Progress

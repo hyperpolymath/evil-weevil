@@ -135,7 +135,16 @@ We do not advance on vibes. Each phase has a gate that can fail.
   wired v0 fixture, the same fixture with memory opted out — still exactly v0's old
   number — and "the one that got away", which reaches forgetting). No layout moved:
   v0 had already reserved the memory fields and left the agent's flag bits undefined.
-  Next inside this phase: the utility/behaviour graph, then steering.
+
+  *Landed 2026-09-20:* the decision rule as a utility graph (ADR-0010). The chain
+  became scores plus a maximum; the scores are the priorities the kernel already put on
+  the wire, the tie-break order is the old branch order, and the acceptance test was
+  chosen before the work started — the three pinned digests and the 10,000-tick trace,
+  tick by tick. The first attempt FAILED that test (digest 57428431722396483), which is
+  what exposed a real disagreement between `Abi.Memory`'s written precedence and the
+  shipped kernel; the specification was corrected to the measured behaviour and the
+  collision is now pinned by theorems on both sides. Adding a behaviour from here is
+  adding a score. Next inside this phase: steering, then the budget guard.
 
 | *3. Authoring*
 | Enemy definition schema (a2ml), compiler, workbench, replay inspector.

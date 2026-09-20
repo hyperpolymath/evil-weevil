@@ -254,25 +254,41 @@ record Seeing where
 ||| The v0 rule, extended at exactly one point: with nothing visible and a memory
 ||| still fresh, the agent investigates instead of advancing.
 |||
-||| Branch ORDER is the policy, not an accident. Ammo first, sight before memory,
-||| and (inside sight) flee before attack before advance — the same order
-||| `Abi.Foreign.decide` uses, so memory cannot quietly reorder v0's behaviour.
-||| The returned triple is (action, target id, intent flags); the flag is the
-||| literal 8 with `Abi.Types.intentFlagFromMemory` as its name, because the
-||| theorems below pin the number.
+||| Branch ORDER is the policy, not an accident — and the order this rule has is
+||| the order the SHIPPED kernel has, which ADR-0010 established by measurement
+||| after this module first got it wrong. With something in sight the old rule
+||| applies unchanged, ammo first: flee before attack before advance, and no ammo
+||| outranks all of it (an agent with nothing to shoot at reloads). With NOTHING in
+||| sight a fresh lead outranks the magazine, because that is what `kernel.zig` did
+||| when this rule was written and the pinned digest says so: the kernel decided
+||| with the chain and then ran its memory branch on the way out, so the memory
+||| REPLACED the decision. The two orders disagree at exactly one moment — nothing
+||| visible, a fresh lead, no ammo — and at `t = 85, 170, ...` of the 10,000-tick
+||| trace the disagreement moved the digest from 14165495496352896129 to
+||| 57428431722396483 while this module was still claiming otherwise.
+|||
+||| Which order is DESIRABLE is a policy question this slice is not allowed to
+||| answer (ADR-0010 decision 6 records it as open): a refactor may not change
+||| behaviour, and a specification that disagrees with the code the digest pins is
+||| the specification that is wrong. The returned triple is (action, target id,
+||| intent flags); the flag is the literal 8 with
+||| `Abi.Types.intentFlagFromMemory` as its name, because the theorems below pin
+||| the number.
 public export
 decideWithMemory : Seeing -> (Action, Nat, Nat)
 decideWithMemory s =
-  if seenAmmo s == 0
-     then (ActReload, 0, 0)
-     else if seenContacts s /= 0
-             then if seenHealth s < 16384 && seenNearestDist s < 131072
+  if seenContacts s /= 0
+     then if seenAmmo s == 0
+             then (ActReload, 0, 0)
+             else if seenHealth s < 16384 && seenNearestDist s < 131072
                      then (ActFlee, seenNearestId s, 0)
                      else if seenNearestDist s <= 65536
                              then (ActAttack, seenNearestId s, 0)
                              else (ActAdvance, seenNearestId s, 0)
-             else if memFresh (seenMemory s)
-                     then (ActInvestigate, memId (seenMemory s), 8)
+     else if memFresh (seenMemory s)
+             then (ActInvestigate, memId (seenMemory s), 8)
+             else if seenAmmo s == 0
+                     then (ActReload, 0, 0)
                      else (ActAdvance, 0, 0)
 
 ||| Nothing in sight, but a fresh memory: investigate what was remembered, and SAY
@@ -292,12 +308,34 @@ advancesWithoutMemory :
   = (ActAdvance, 0, 0)
 advancesWithoutMemory = Refl
 
-||| Memory does not override the ammo rule.
+||| Memory does not override the ammo rule WHERE THERE IS SOMETHING TO SHOOT AT.
+||| This was `reloadOutranksMemory` and it asserted the opposite of what the kernel
+||| does, because it was the only theorem here that put no ammo and a fresh memory in
+||| the same moment — and that moment is precisely where the two orders diverge. See
+||| the module header and ADR-0010: the digest decided, and the digest follows the
+||| kernel.
 export
-reloadOutranksMemory :
-  decideWithMemory (MkSeeing 65536 0 0 0 0 0 0 (remember 42 16384 8192 Abi.Memory.emptyMemory))
+sightingKeepsReloadUrgent :
+  decideWithMemory (MkSeeing 65536 0 1 40000 9 0 0 (remember 42 16384 8192 Abi.Memory.emptyMemory))
   = (ActReload, 0, 0)
-reloadOutranksMemory = Refl
+sightingKeepsReloadUrgent = Refl
+
+||| The other side of that moment, pinned so that neither half of the collision can
+||| move alone: blind, out of ammo, and still following the lead — `t = 85`, as the
+||| kernel does it and as the digest asserts it.
+export
+blindWithLeadInvestigatesEvenOutOfAmmo :
+  decideWithMemory (MkSeeing 65536 0 0 0 0 0 0 (remember 42 16384 8192 Abi.Memory.emptyMemory))
+  = (ActInvestigate, 42, 8)
+blindWithLeadInvestigatesEvenOutOfAmmo = Refl
+
+||| And with nothing remembered, the ammo rule is back in charge: the magazine is
+||| the only thing left to reach for.
+export
+noLeadOutOfAmmoReloads :
+  decideWithMemory (MkSeeing 65536 0 0 0 0 0 0 Abi.Memory.emptyMemory)
+  = (ActReload, 0, 0)
+noLeadOutOfAmmoReloads = Refl
 
 ||| A visible contact beats a memory every time, so an agent never investigates
 ||| where somebody *was* while somebody is standing in front of it.

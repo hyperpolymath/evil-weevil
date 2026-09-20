@@ -40,6 +40,7 @@ These proofs come from the evil-weevil and MUST be present in every repo:
 | ABI-4 | FFI function return type proofs | Done 2026-09-20 | `verification/proofs/idris2/ABI/Foreign.idr`
 | ABI-5 | C ABI compliance (`CABICompliant`, `FieldsAligned`) | Done 2026-09-20 | `verification/proofs/idris2/ABI/Compliance.idr`
 | ABI-6 | THE SEAM ITSELF: model, layout, tick rule and the generator's refusals | Done 2026-09-20 | `src/interface/Abi/{Types,Layout,Foreign,Gen}.idr` (gated in the MANIFEST, checked by `just proof-check-idris2`) |
+| ABI-7 | THE RULES: v0's decision rule, perception memory, and the utility graph's agreement with BOTH — including the one moment where a score alone would have decided differently | Done 2026-09-20 | `src/interface/Abi/{Foreign,Memory,Utility}.idr` (gated in the MANIFEST; the graph's claim is checked against the three pinned digests, not only against itself) |
 |===
 
 === Typing Proofs (Prover Varies)

@@ -66,14 +66,27 @@ Three things had to be settled before any code could exist:
    60 Hz: long enough to walk around the pillar, short enough that nobody arrives
    ten seconds late. Per-contact-class TTLs are a later refinement, not a v1 need.
 
-4. **The rule grows exactly one branch, and keeps its order.** Ammo, then sight,
-   then memory; inside sight, flee, attack, advance — as in `Abi.Foreign`, whose
-   branch order is itself pinned by theorems. With nothing visible and a fresh
-   memory the agent INVESTIGATES the remembered direction; with nothing visible and
-   nothing remembered it advances, exactly as v0 did. The intent carries
+4. **The rule grows exactly one branch.** With nothing visible and a fresh memory
+   the agent INVESTIGATES the remembered direction; with nothing visible and nothing
+   remembered it advances, exactly as v0 did. The intent carries
    `EE_INTENT_FLAG_FROM_MEMORY` when the action came from memory, so a host can
    tell "walking towards an enemy" from "walking towards where an enemy was" —
    which is the whole point of having memory at all.
++
+   CORRECTED 2026-09-20 by ADR-0010. This decision read "ammo, then sight, then
+   memory", and that order is not the one that shipped. The kernel decided with the
+   chain and then ran its memory branch on the way out, so a fresh memory with
+   nothing visible REPLACED the decision, ammo included. The two orders disagree at
+   exactly one moment — nothing visible, a fresh lead, no ammo — which lands on
+   `t = 85, 170, ...` of the 10,000-tick trace because that fixture empties the
+   magazine every seventeenth tick and drops contacts every fifth. The written order
+   was therefore wrong about the code, and `Abi.Memory` carried a theorem
+   (`reloadOutranksMemory`) asserting the wrong precedence until the utility-graph
+   slice's agreement check caught it: writing the graph to match the COMMENT moved
+   the pinned digest from 14165495496352896129 to 57428431722396483. The rule and
+   the theorem now state the measured order, pinned from both sides. Whether an
+   ammo-less agent should investigate at all remains a policy question, recorded as
+   open in ADR-0010 decision 6.
 
 5. **Two pinned digests, not one changed one.** The 10,000-tick v0 trace keeps
    4061121875253101873 and MUST keep it: it is the evidence that adding memory did

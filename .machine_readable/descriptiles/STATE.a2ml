@@ -24,12 +24,13 @@ purpose = "A universally injectable enemy-intelligence kernel for computer games
 # Phase 1 (the seam) is complete and mechanically enforced: the ABI header is
 # generated from a proved model, both null hosts agree on three pinned digests,
 # and `just seam-check` fails if any of that stops being true. Phase 2 has landed
-# its first half: perception and memory are specified, proved, implemented and
-# pinned — an agent that loses a contact investigates where it went, for at most
-# memory_ttl ticks, then forgets. Still to come inside Phase 2: the
-# utility/behaviour graph, steering. This number counts working behaviour, not
-# scaffolding and not specifications.
-completion-percentage = 15
+# both halves it has started: perception and memory — an agent that loses a contact
+# investigates where it went, for at most memory_ttl ticks, then forgets — and the
+# decision rule itself, rewritten as a utility graph so a behaviour can be added by
+# adding a score. Still to come inside Phase 2: steering, budget guard, golden
+# replays. This number counts working behaviour, not scaffolding and not
+# specifications.
+completion-percentage = 22
 
 [position]
 phase = "implementation"   # design | implementation | testing | maintenance | archived
@@ -39,7 +40,7 @@ maturity = "experimental"  # experimental | alpha | beta | production | lts
 milestones = [
   { name = "Phase 0: identity — minted from rsr-template-repo, drift repaired, clade chosen, gates green", completion = 100 },
   { name = "Phase 1: the seam — ee.h v0, Idris2 layout/purity proofs, Zig FFI, null host, 10k-tick harness", completion = 100 },
-  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 35 },  # memory done end to end (ADR-0009); utility graph and steering remain
+  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 50 },  # memory (ADR-0009) and the utility graph (ADR-0010) are done end to end; steering, budget guard and golden replays remain
   { name = "Phase 3: authoring — enemy definition schema (a2ml), compiler, workbench and replay inspector", completion = 0 },
   { name = "Phase 4: adapters — Godot 4, Unity, Unreal, WASM, each passing one conformance kit", completion = 0 },
   { name = "Phase 5: populations — squads and roles, spawn director, threat curve, crowd LOD", completion = 0 },
@@ -78,9 +79,9 @@ milestones = [
 
 [critical-next-actions]
 actions = [
-  "Phase 2 — replace the five-branch rule with a utility/behaviour graph, keeping the three pinned digests: a changed policy MUST change them deliberately, in both hosts, with the reason written down",
   "Phase 2 — steering: turn the INVESTIGATE direction into a path (this is where a remembered POSITION may finally earn its keep, and where Abi.Memory's bearing choice gets revisited)",
-  "Phase 2 — replace the five-branch rule with a utility/behaviour graph while keeping the pinned digest test: a changed policy MUST change that number, deliberately",
+  "Phase 2 — open policy question recorded in ADR-0010 decision 6 and NOT settled: should an ammo-less agent with nothing in sight investigate a fresh lead, or reload? v0 investigates (digest-pinned); answering it means changing kernel, both rule modules and the pinned digest in one change",
+  "Phase 2 — the utility graph is the place the next behaviours land: add a score (a behaviour against a visible contact) or widen candidates (a new kind of moment), never a branch in the middle of a chain",
   "Phase 2 — age the memory properly, later: TTLs per contact class rather than the one 36-tick interval Abi.Memory currently pins",
   "File the upstream mint defects against rsr-template-repo (three now; MINT-NOTES.adoc §5-6)",
   "Ratify ADR-0004 (injection modes), ADR-0005 (ABI versioning and capability negotiation), ADR-0006 (determinism policy) before Phase 2 opens",

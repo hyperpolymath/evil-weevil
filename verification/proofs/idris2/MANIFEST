@@ -18,7 +18,8 @@ src/interface|Abi/Types.idr|gated| the ABI model: struct fields, fixed-point, ve
 src/interface|Abi/Layout.idr|gated| offset and size proofs for all seven structs, incl. ee_context (72 B). Offsets are proved over literal field lists; see the module header for why.
 src/interface|Abi/Foreign.idr|gated| the tick model and the v0 decision rule (decide/tickModel) with their branch proofs. The kernel in src/core/kernel.zig implements this.
 src/interface|Abi/Gen.idr|gated| the generator itself: cross-checks proven sizes against declared fields and emits ee.h + ee_layout.zig. Gated so a generator that stops compiling cannot pass CI while still producing a plausible header.
-src/interface|Abi/Memory.idr|gated| Phase 2 slice 1: perception memory (TTL, freshness, forgetting) and the memory-armed rule, with the TTL and the from-memory flag pinned by theorems. SPECIFICATION ONLY — the Zig kernel does not read it yet, so the pinned digest is deliberately unchanged. Adding it here means it cannot quietly stop compiling while the wiring lands.
+src/interface|Abi/Utility.idr|gated| Phase 2 slice 2: the utility graph — v0's branch chain written as scores and a maximum, so a behaviour can be added by adding a score. Gated because the claim of the slice is a THEOREM-shaped claim (the three pinned digests do not move) and this module is half of the evidence; the null hosts are the other half.
+src/interface|Abi/Memory.idr|gated| Phase 2 slice 1: perception memory (TTL, freshness, forgetting) and the memory-armed rule, with the TTL and the from-memory flag pinned by theorems. SPECIFICATION + WIRED: the Zig kernel implements this (commit 4db53ae), and `Memory.idr`'s prediction that the digest could not move was REFUTED by measurement — see ADR-0009 decision 5.
 
 # ─── Idris2 material carried from the RSR template ───────────────────────────
 verification/proofs/idris2|ABI/Foreign.idr|gated| the shipped template module that compiles — real content, not a stub

@@ -13,9 +13,10 @@
 // properties that make a replay bit-exact.
 //
 // The kernel is deliberately naive in its POLICY and strict in its DISCIPLINE
-// (deterministic, budgeted, capability-aware). Phase 2 has added exactly one
-// branch: perception memory (ADR-0009), specified and proved in
-// `src/interface/Abi/Memory.idr`. Nothing here has grown a dependency.
+// (deterministic, budgeted, capability-aware). Phase 2 has added perception memory
+// (ADR-0009, `src/interface/Abi/Memory.idr`) and replaced the branch chain with a
+// utility graph (ADR-0010, `src/interface/Abi/Utility.idr`) — a refactor that
+// moved no digest. Nothing here has grown a dependency.
 
 const abi = @import("abi");
 
@@ -122,80 +123,204 @@ const FLEE_RANGE: i32 = 131072; // 2.00 — but only runs from threats this clos
 
 /// The v0 rule. The branch ORDER is the policy: an unarmed agent reloads even
 /// while wounded and under fire, which `Abi.Foreign.reloadOutranksFlee` pins.
-pub fn decide(snap: *const abi.EeSnapshot) Decision {
+// ── The utility graph (Phase 2, ADR-0010) ──────────────────────────────────
+// The five-branch chain IS the policy; these numbers are that policy with the
+// branch structure taken out, so it can be extended by adding a score instead of
+// by arguing about where a new branch goes. The model, and the proofs that each
+// branch of v0 still comes out of the graph, are in src/interface/Abi/Utility.idr.
+//
+// Every weight here is a number the intents ALREADY reported in `priority`
+// (65536/58982/52428/26214, plus Phase 2's 32768 for INVESTIGATE). That is why
+// replacing the chain with a maximum over them moves no digest: it is the rule v0
+// was already following, written where it can be read. If a future tuning changes
+// a number, the digests move and that is the point.
+//
+// The weights are deliberately NOT in ee.h: policy weights are not ABI. A host may
+// read `priority` to compare two intents, but a host that hard-codes 58982 as
+// "flee" would break the day the graph is tuned, and tuning it is what the graph
+// is for.
+
+const UTILITY_RELOAD: u32 = 65536; // 1.00
+const UTILITY_FLEE: u32 = 58982; // 0.90
+const UTILITY_ATTACK: u32 = 52428; // 0.80
+const UTILITY_INVESTIGATE: u32 = 32768; // 0.50
+const UTILITY_ADVANCE: u32 = 26214; // 0.40
+
+/// The candidates, in tie-break order — the model's `allCandidates`. The order is
+/// v0's branch order, because a tie the scores cannot settle should be settled the
+/// way the chain settled it, and the order is checked against the model, which
+/// breaks ties the same way. `candidatesFor` below narrows this list for the one
+/// moment where v0's memory branch outranked everything else.
+const CANDIDATES = [_]u32{
+    abi.ACTION_RELOAD,
+    abi.ACTION_FLEE,
+    abi.ACTION_ATTACK,
+    abi.ACTION_INVESTIGATE,
+    abi.ACTION_ADVANCE,
+    abi.ACTION_HOLD,
+};
+
+/// One action's score in one moment. Thresholds are the same literals the model
+/// pins (`Abi.Foreign`: 16384 wounded, 65536 attack range, 131072 flee range).
+fn utilityOf(action: u32, snap: *const abi.EeSnapshot, near: ?Nearest, memory_fresh: bool) u32 {
+    return switch (action) {
+        abi.ACTION_RELOAD => if (snap.ammo == 0) UTILITY_RELOAD else 0,
+        abi.ACTION_FLEE => if (near) |n|
+            (if (snap.health < WOUNDED_BELOW and n.distance < FLEE_RANGE) UTILITY_FLEE else 0)
+        else
+            0,
+        abi.ACTION_ATTACK => if (near) |n|
+            (if (n.distance <= ATTACK_RANGE) UTILITY_ATTACK else 0)
+        else
+            0,
+        // Not enough to have no contact: with nothing visible and nothing
+        // remembered, walking is worth more than investigating nothing.
+        abi.ACTION_INVESTIGATE => if (near == null and memory_fresh) UTILITY_INVESTIGATE else 0,
+        abi.ACTION_ADVANCE => if (near != null)
+            UTILITY_ADVANCE
+        else if (memory_fresh)
+            0 // the memory is worth more than a walk, so walking scores nothing
+        else
+            UTILITY_ADVANCE,
+        // IDLE, TAKE_COVER, REGROUP and anything the ABI grows later: not
+        // candidates. Zero can never beat a positive score, so this is a
+        // deliberate "no opinion" rather than a silent default.
+        else => 0,
+    };
+}
+
+/// The first maximum, in candidate order.
+/// The candidates for a MOMENT — the model's `Abi.Utility.candidates`, which is a
+/// function of the situation rather than a constant list, and for one reason.
+///
+/// v0 decided with a chain and then ran its memory branch on the way out, so a
+/// memory that was fresh and had nothing to compete with REPLACED the decision.
+/// The chain and the memory branch disagree at exactly one kind of moment — nothing
+/// visible, a fresh lead, no ammo: the chain says reload, the memory branch says
+/// investigate — and the memory branch won, because it ran last.
+///
+/// Measured, not assumed: this trace drops contacts every fifth tick and empties
+/// the magazine every seventeenth, so the collision lands on ticks 85, 170, ...
+/// and letting reload win there moved the pinned digest from
+/// 14165495496352896129 to 57428431722396483. So the moment is written as having
+/// one candidate. Investigation is not scoring higher than reload — with nothing to
+/// look at, the lead is the task, and raising its score instead would change the
+/// priority the intent REPORTS, which is ABI.
+///
+/// Whether an ammo-less agent should investigate at all is a policy question this
+/// refactor is not allowed to answer. It is recorded as open in ADR-0010; answering
+/// it moves the digest, which is how the change announces itself as policy.
+fn candidatesFor(near: ?Nearest, memory_fresh: bool) []const u32 {
+    if (near == null and memory_fresh) return &[_]u32{abi.ACTION_INVESTIGATE};
+    return &CANDIDATES;
+}
+
+fn chooseAction(snap: *const abi.EeSnapshot, near: ?Nearest, memory_fresh: bool) u32 {
+    var best_action: u32 = abi.ACTION_HOLD;
+    var best_score: u32 = 0;
+    for (candidatesFor(near, memory_fresh)) |a| {
+        const sc = utilityOf(a, snap, near, memory_fresh);
+        if (sc > best_score) {
+            best_score = sc;
+            best_action = a;
+        }
+    }
+    return best_action;
+}
+
+/// Decide what this agent should do.
+///
+/// Reads `agent` for exactly one thing — whether the memory is fresh — and reads
+/// it BEFORE the tick's bookkeeping, so the freshness it acts on is the freshness
+/// the tick opened with. That is what makes this the same rule as
+/// `Abi.Memory.decideWithMemory` rather than a similar one.
+pub fn decide(snap: *const abi.EeSnapshot, agent: *const abi.EeAgent) Decision {
     const near = nearestContact(snap);
 
-    // 1. No ammo: reload. Outranks everything, including self-preservation.
-    if (snap.ammo == 0) {
-        return .{
+    switch (chooseAction(snap, near, memoryFresh(agent))) {
+        abi.ACTION_RELOAD => return .{
             .action = abi.ACTION_RELOAD,
             .target = 0,
-            .priority = 65536, // 1.00
+            .priority = UTILITY_RELOAD,
             .speed = 0,
             .move_x = 0,
             .move_y = 0,
             .look_x = 0,
             .look_y = 0,
-        };
-    }
+        },
 
-    // 2. Nothing to fight: advance.
-    if (near == null) {
-        return .{
-            .action = abi.ACTION_ADVANCE,
+        // FLEE and ATTACK score zero without a contact, so the graph cannot pick
+        // them here without one. The `.?` is that invariant, asserted by the
+        // switch rather than assumed by the reader.
+        abi.ACTION_FLEE => {
+            const n = near.?;
+            return .{
+                .action = abi.ACTION_FLEE,
+                .target = n.id,
+                .priority = UTILITY_FLEE,
+                .speed = 2 * abi.FX_ONE,
+                .move_x = -@as(i32, n.bearing_cos),
+                .move_y = -@as(i32, n.bearing_sin),
+                .look_x = @intCast(n.bearing_cos),
+                .look_y = @intCast(n.bearing_sin),
+            };
+        },
+
+        abi.ACTION_ATTACK => {
+            const n = near.?;
+            return .{
+                .action = abi.ACTION_ATTACK,
+                .target = n.id,
+                .priority = UTILITY_ATTACK,
+                .speed = 0,
+                .move_x = -@as(i32, n.bearing_cos),
+                .move_y = -@as(i32, n.bearing_sin),
+                .look_x = @intCast(n.bearing_cos),
+                .look_y = @intCast(n.bearing_sin),
+            };
+        },
+
+        // The Phase 2 branch, unchanged in what it does and now reached by score
+        // rather than by an `else if` in the tick.
+        abi.ACTION_INVESTIGATE => return investigate(agent),
+
+        abi.ACTION_ADVANCE => {
+            if (near) |n| {
+                return .{
+                    .action = abi.ACTION_ADVANCE,
+                    .target = n.id,
+                    .priority = UTILITY_ADVANCE,
+                    .speed = abi.FX_ONE,
+                    .move_x = @intCast(n.bearing_cos),
+                    .move_y = @intCast(n.bearing_sin),
+                    .look_x = @intCast(n.bearing_cos),
+                    .look_y = @intCast(n.bearing_sin),
+                };
+            }
+            // Nothing visible and nothing remembered: v0's walk, with no target.
+            return .{
+                .action = abi.ACTION_ADVANCE,
+                .target = 0,
+                .priority = UTILITY_ADVANCE,
+                .speed = abi.FX_ONE,
+                .move_x = 0,
+                .move_y = 0,
+                .look_x = 0,
+                .look_y = 0,
+            };
+        },
+
+        else => return .{
+            .action = abi.ACTION_HOLD,
             .target = 0,
-            .priority = 26214, // 0.40
-            .speed = abi.FX_ONE,
+            .priority = 0,
+            .speed = 0,
             .move_x = 0,
             .move_y = 0,
             .look_x = 0,
             .look_y = 0,
-        };
+        },
     }
-
-    const n = near.?;
-    const move_away: i32 = -@as(i32, n.bearing_cos);
-    const move_away_y: i32 = -@as(i32, n.bearing_sin);
-
-    // 3. Wounded and a threat within flee range: break off.
-    if (snap.health < WOUNDED_BELOW and n.distance < FLEE_RANGE) {
-        return .{
-            .action = abi.ACTION_FLEE,
-            .target = n.id,
-            .priority = 58982, // 0.90
-            .speed = 2 * abi.FX_ONE,
-            .move_x = move_away,
-            .move_y = move_away_y,
-            .look_x = @intCast(n.bearing_cos),
-            .look_y = @intCast(n.bearing_sin),
-        };
-    }
-
-    // 4. In range: attack, holding position.
-    if (n.distance <= ATTACK_RANGE) {
-        return .{
-            .action = abi.ACTION_ATTACK,
-            .target = n.id,
-            .priority = 52428, // 0.80
-            .speed = 0,
-            .move_x = move_away,
-            .move_y = move_away_y,
-            .look_x = @intCast(n.bearing_cos),
-            .look_y = @intCast(n.bearing_sin),
-        };
-    }
-
-    // 5. Otherwise close the distance.
-    return .{
-        .action = abi.ACTION_ADVANCE,
-        .target = n.id,
-        .priority = 26214, // 0.40
-        .speed = abi.FX_ONE,
-        .move_x = @intCast(n.bearing_cos),
-        .move_y = @intCast(n.bearing_sin),
-        .look_x = @intCast(n.bearing_cos),
-        .look_y = @intCast(n.bearing_sin),
-    };
 }
 
 // ── The tick ────────────────────────────────────────────────────────────────
@@ -285,17 +410,19 @@ pub fn tick(
     _ = rngNext(&agent.rng_state);
 
     const near = nearestContact(snap);
-    var d = decide(snap);
-    var from_memory = false;
 
     // The memory a tick DECIDES with is the one it carried in; the time it spends
-    // is accounted for on the way out. That ordering is what makes this code and
-    // `Abi.Memory.decideWithMemory` one rule rather than two similar ones:
-    // freshness is read before the age moves.
-    //
-    // Branch order is the policy, and it does not change here: a sighting is
-    // handled by the five-branch rule above (sight outranks memory), and memory is
-    // consulted only when there is nothing to see.
+    // is accounted for on the way out. The graph reads `memoryFresh(agent)` here,
+    // BEFORE the bookkeeping below — that ordering is what makes this code and
+    // `Abi.Memory.decideWithMemory` one rule rather than two similar ones.
+    const d = decide(snap, agent);
+
+    // An intent that came from memory says so. INVESTIGATE scores above zero only
+    // when there is no contact AND the memory is fresh, so being chosen is the
+    // same test the old flag performed — without a second variable to keep in step
+    // with the action.
+    const from_memory = d.action == abi.ACTION_INVESTIGATE;
+
     if (near) |n| {
         // The most recent look is the best one: the direction is overwritten and
         // the age resets. The id needs no field of its own — `cached_target` is
@@ -305,10 +432,6 @@ pub fn tick(
         agent.memory_age = 0;
         agent.flags |= abi.AGENT_FLAG_MEMORY_VALID;
     } else {
-        if (memoryFresh(agent)) {
-            d = investigate(agent);
-            from_memory = true;
-        }
         ageMemory(agent);
     }
 

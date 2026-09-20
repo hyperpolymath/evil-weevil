@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Architecture Decision Record: 0010-utility-graph
+
+== 10. The rule becomes a utility graph — and the one moment where v0's ORDER was the policy
+
+Date: 2026-09-20
+
+=== Status
+
+Accepted (implemented in the same change; this ADR records what shipped).
+
+=== Context
+
+v0's decision rule is a chain of `if`s (`Abi.Foreign.decide`,
+`src/core/kernel.zig`). The chain works, but it does not extend: adding a behaviour
+means choosing a position in the chain, and every position is a judgement about
+precedence that the code records only as indentation. Phase 2 is going to add
+behaviours — steering, cover, regrouping — and the second one added to a chain is
+the one where nobody can tell any more which branch shadows which.
+
+So the chain becomes a **utility graph**: each candidate action scores, the highest
+score wins, ties go to the earlier candidate. That is the whole mechanism.
+
+The danger is obvious and it is the reason this ADR exists. "Refactor to a graph"
+is the kind of claim that silently changes policy — a score that is slightly wrong,
+a tie that is settled the other way, a candidate that is no longer reachable — and
+the resulting program still compiles, still runs, and still looks like a skeleton.
+The refactor therefore needed an acceptance test that could FAIL, chosen before the
+work started: **the three pinned digests and the 10,000-tick trace do not move.**
+
+=== Decision
+
+==== 1. The weights are the priorities the kernel already reported
+
+`EE_ACTION_RELOAD` 65536, FLEE 58982, ATTACK 52428, INVESTIGATE 32768 (the one
+Phase 2 added), ADVANCE 26214, HOLD 0. These are not new numbers chosen to make the
+graph produce the right answer; they are the constants the chain's branches already
+stamped into `ee_intent.priority`. A graph whose scores are the numbers the old
+program published is checkable against the old program's output; a graph whose
+scores are new numbers is a new policy wearing the old policy's name.
+
+==== 2. Tie-break order is v0's branch order, and the model checks it
+
+A score cannot express "reload before flee when both score the same", and the chain
+could. The candidate list is therefore ordered as the branches were — reload, flee,
+attack, investigate, advance, hold — and `Abi.Utility.best` takes the EARLIEST
+maximum. `candidates` order and branch order are the same fact written twice, which
+is exactly the kind of duplication that drifts, so the agreement theorems in the
+module pin both sides.
+
+==== 3. The scores are not on the wire
+
+`Abi.Utility`'s scores are deliberately NOT emitted into `ee.h`. `ee_intent.priority`
+is ABI and a host may compare two intents with it, but a host that hard-codes 58982
+as "flee" would break the day the graph is tuned — and tuning the graph is what the
+graph exists to make easy. The wire carries actions, targets and flags; weights are
+ours. This also means the graph can be tuned without an ABI version bump, which is
+the correct amount of coupling between policy and layout.
+
+==== 4. The candidate SET is a function of the situation — because v0's order was the policy
+
+This is the finding of the slice, and it was found by measurement rather than by
+reading.
+
+v0 decided with the chain and then ran its memory branch on the way out:
+
+[source,zig]
+----
+var d = decide(snap);                  // the chain
+if (near) |n| { /* sight overwrites the memory */ }
+else {
+    if (memoryFresh(agent)) d = investigate(agent);   // memory REPLACES d
+    ageMemory(agent);
+}
+----
+
+A fresh memory with nothing visible therefore outranked every branch of the chain,
+including the first one. v0's own comment on that branch claimed the opposite —
+"no ammo: reload. Outranks everything, including self-preservation" — and the
+comment was wrong about the code, in one specific moment: **nothing visible, a fresh
+lead, no ammo.**
+
+The two rules disagree nowhere else. In fixture 1 contacts drop every fifth tick
+(`contact_count = t % 5`) and the magazine empties every seventeenth, so the
+collision lands on `t = 85, 170, 255, ...`. Writing the graph as "reload simply
+scores higher" made reload win there, and the pinned digest moved from
+`14165495496352896129` to `57428431722396483` — the refactor was caught by its own
+evidence, which is the only reason to trust the rest of it.
+
+The graph was then corrected to reproduce v0, and the correction is structural
+rather than numeric:
+
+* `Abi.Utility.candidates : Situation -> List Action` returns ONE candidate —
+  investigate — when there is nothing visible and the memory is fresh, and the full
+  ordered list otherwise. `src/core/kernel.zig`'s `candidatesFor` is the same
+  function, and the comment there names the same measurement.
+* Investigation does NOT get a score above reload's. Raising it would have changed
+  the priority the intent REPORTS for an investigation (32768 was already on the
+  wire), so the "fix" would have moved the digest again — and changed an ABI-visible
+  value to make an internal ordering work.
+* The reasoning that makes the singleton defensible rather than a hack: with nothing
+  to look at, the lead is not an option being weighed against reloading, it is the
+  task. The agent is not choosing between two candidates; one candidate applies.
+
+The pair is pinned from both sides in the module, so neither half can drift:
+
+[source,idris]
+----
+noLeadOutOfAmmoReloads : choose (MkSituation False 0 False True False) = ActReload
+blindWithLeadInvestigatesEvenOutOfAmmo : choose (MkSituation False 0 False True True) = ActInvestigate
+----
+
+==== 5. The acceptance test, and its result
+
+* The 10,000-tick trace, tick by tick, versus the pre-refactor kernel: **identical**
+  (compared as a full action/target/position/flags dump, not as a digest, so a
+  compensating pair of errors would still have been caught).
+* memory-ON digest `14165495496352896129` — unchanged.
+* memory-OFF digest `4061121875253101873` — unchanged (memory cleared each tick).
+* chase digest `12283675074724005768` — unchanged, investigate=3600, advance=6400,
+  from_memory=3600.
+* the 200-tick C-host census — reload=10, advance=75, attack=50, flee=26, hold=0,
+  investigate=39 — unchanged.
+* `just kernel-host-test` green, `zig build test` 31/31, `just abi-check`,
+  `just proof-check-idris2` and `just seam-check` green.
+
+A digest that does not move is only evidence if the change could have moved it, so
+the slice records the movement it actually caused (`57428431722396483`) as proof
+that this particular measurement is live rather than vacuous.
+
+==== 6. Open question, deliberately NOT settled here
+
+**Should an ammo-less agent with a fresh lead investigate, or reload?** v0
+investigates; the argument for reloading is that a lead is only worth following if
+you can do something about what you find. This is a real policy question and it is
+left open on purpose: answering it changes behaviour, and a refactor is not allowed
+to change behaviour. ADR-0006 already prescribes how it would be answered — decide
+deliberately, change the pinned digest in the same change, and say which number moved
+and why. The collision case is now explicit in the code and pinned by a theorem,
+which is what makes it safe to leave open.
+
+=== Consequences
+
+* Adding a behaviour to the kernel is adding a score (for a visible contact) or
+  widening `candidates` (for a new kind of moment) — never inserting a branch in the
+  middle of a chain and hoping the shadowing is obvious.
+* Scores are total over the ABI's nine actions by construction: `scoreOf` matches
+  every constructor, with IDLE, TAKE_COVER and REGROUP scoring 0 explicitly. An
+  action added to the ABI later fails the totality check rather than silently
+  scoring zero, so the policy question cannot be answered by a compiler warning.
+* The graph is a module of the ABI seam (`Abi.Utility`), gated in `abi.ipkg` and in
+  the proof MANIFEST, so a graph that stops compiling fails CI instead of quietly
+  producing plausible intents.
+* The kernel's header comment about reload "outranking everything" is corrected in
+  place: reload outranks every VISIBLE encounter, and does not outrank a lead worth
+  following. Comments that made claims the code did not honour are how this slice
+  found its own bug, and the fix for a wrong comment is a measurement, not a rewrite.

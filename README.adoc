@@ -34,9 +34,11 @@ seam, end to end and mechanically gated: seven ABI structs proved in Idris2, a
 generated `ee.h` at ABI 1.0 that a C host can compile against, a Zig kernel that
 asserts its own layout at comptime, and two null hosts — one Zig, one C — that agree
 on three pinned digests (two fixtures, one of them the v0 trace with memory opted
-out, which is still exactly v0's). The behaviour itself is deliberately naive: the v0
-rule is five branches over health, ammo, contacts and range. No adapter and no
-support-matrix entry is claimed. `STATE.a2ml` carries the live number (currently 10%),
+out, which is still exactly v0's). The behaviour itself is deliberately naive: the rule is
+a utility graph over health, ammo, contacts, range and a remembered bearing — a
+maximum over scored candidates that reproduces, tick for tick, the five-branch chain
+it replaced (ADR-0010). No adapter and no support-matrix entry is claimed.
+`STATE.a2ml` carries the live number (currently 22%),
 `docs/developer/DEVELOPMENT-PLAN.adoc` carries the route, and `just seam-check` is
 the one command that reproduces the claim above.
 
@@ -47,6 +49,15 @@ forgets — and forgetting clears the payload rather than only lowering a flag.
 forgetting properties; `src/core/kernel.zig` implements it; ADR-0009 records what is
 remembered (a bearing and an age, not a position), where it lives, and how it is
 checked.
+
+Phase 2 has also landed the rule itself, rewritten as a utility graph
+(`src/interface/Abi/Utility.idr`, ADR-0010) without moving any of the three digests:
+the weights are the priorities the kernel was already reporting, and the one moment
+where a score alone would have decided differently — nothing visible, a fresh lead, no
+ammo — is written as a candidate set of one, because that is what the shipped kernel
+did. That moment is worth a paragraph in the ADR: the graph, written to match the
+comment, moved the pinned digest to `57428431722396483`, which is how the slice found
+that `Abi.Memory` had been asserting a precedence the kernel did not have.
 
 The ABI did not move to make room for it. v0's `ee_agent` had carried `memory_x`,
 `memory_y` and `memory_age` unused since the freeze, and its `flags` field had no
