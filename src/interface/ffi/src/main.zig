@@ -44,6 +44,24 @@ pub export fn ee_status_name(status: u32) [*:0]const u8 {
     };
 }
 
+/// Work units per tick, per agent, before the kernel starts degrading.
+///
+/// A constant, and stated as one rather than dressed up as a calculation: the v0
+/// `ee_init_desc` has no field to carry a host-declared budget, so there is nothing
+/// to compute it FROM. Sixteen units is enough for the five-branch rule plus a
+/// handful of contacts, which means an honest v0 host sees no degradation at all and
+/// the degradation path is exercised by tests rather than by every call.
+///
+/// `max_agents` is the only input available, and scaling the per-agent budget by how
+/// many agents the host declared would be a policy the model does not contain — a
+/// number that looks considered but is not. When the descriptor grows a
+/// `budget_units` field (a minor version bump, ADR-0005) this becomes that field, and
+/// this comment goes away rather than quietly becoming wrong.
+fn defaultBudgetUnits(max_agents: u32) u32 {
+    _ = max_agents;
+    return 16;
+}
+
 // ── Init ────────────────────────────────────────────────────────────────────
 
 /// Validate the host's declaration and initialise the caller-owned context.
@@ -73,7 +91,7 @@ pub export fn ee_init(desc: ?*const abi.EeInitDesc, ctx: ?*abi.EeContext) u32 {
         .abi_major = d.abi_major,
         .flags = d.flags,
         .capabilities = d.capabilities,
-        .budget_units = if (d.max_agents == 0) 16 else 16,
+        .budget_units = defaultBudgetUnits(d.max_agents),
         .max_agents = d.max_agents,
         .reserved0 = 0,
         .abi_fingerprint = abi.ABI_FINGERPRINT,

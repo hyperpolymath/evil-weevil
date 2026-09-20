@@ -31,6 +31,11 @@ sourcedir = "."
 
 depends = base
 
+-- Abi.Gen is a PROGRAM (it has a `main`), not part of the library, so it is not
+-- in `modules`. It is still typechecked by the proof gate: see the MANIFEST entries
+-- for src/interface in verification/proofs/idris2/MANIFEST. Add it here only if the
+-- seam is ever packaged for distribution, which would need it in an executable
+-- ipkg of its own.
 modules = Abi.Types
         , Abi.Layout
         , Abi.Foreign
