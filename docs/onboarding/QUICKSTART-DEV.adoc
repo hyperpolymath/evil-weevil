@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
 // Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-// Template: QUICKSTART-DEV.adoc — clone → build → test → PR
-// Replace evil-weevil, UNASSIGNED, UNASSIGNED, UNASSIGNED with actuals
+// evil-weevil developer quick start — clone → build → test → PR
 = evil-weevil — Quick Start for Developers
 :toc:
 :toclevels: 2
 
 == Tech Stack
 
-UNASSIGNED
+* *Zig* — the kernel and the FFI layer (`src/core/`, `src/interface/ffi/`).
+* *Idris2* — the ABI contract (`src/interface/Abi/`); the C header is generated from it.
+* *C ABI* — the one interface every host and adapter speaks (`include/evil_weevil/ee.h`).
+* Host languages (GDScript, C#, C++) appear only in adapters, never in the kernel.
+
+See link:../../docs/decisions/0007-kernel-implementation-language.adoc[ADR-0007] for why.
 
 == Set Up Development Environment
 
@@ -30,16 +34,25 @@ just setup-dev
 
 == Build
 
+*Not implemented yet.* `src/core/` is empty until Phase 1 exits (the seam is frozen
+first — see link:../../docs/developer/DEVELOPMENT-PLAN.adoc[the development plan]).
+Once it lands:
+
 [source,bash]
 ----
-UNASSIGNED
+just build              # Zig kernel + FFI -> C ABI shared library
+just build-release      # optimised build
 ----
 
 == Test
 
+Metadata and structure gates work today; behaviour tests arrive with the kernel.
+
 [source,bash]
 ----
-UNASSIGNED
+just validate           # structure + metadata gates (works now)
+just test               # kernel tests (Phase 1)
+just ci                 # the full gate
 ----
 
 == Project Structure
@@ -47,10 +60,11 @@ UNASSIGNED
 [source]
 ----
 evil-weevil/
-├── src/                  # Source code
-├── src/interface/Abi/              # Idris2 ABI definitions (if applicable)
-├── ffi/zig/              # Zig FFI bridge (if applicable)
-├── tests/                # Test suite
+├── src/core/                 # the host-agnostic kernel (empty until Phase 1)
+├── src/interface/Abi/        # Idris2 ABI contract: layout, purity, exhaustiveness
+├── src/interface/ffi/        # Zig implementation of the C ABI
+├── include/evil_weevil/      # ee.h — generated from the Idris2 types, never hand-edited
+├── tests/                    # Test suite, incl. the golden-replay corpus
 ├── docs/                 # Documentation
 ├── .machine_readable/    # Checkpoint files (STATE, META, ECOSYSTEM)
 ├── Justfile              # Task runner recipes
@@ -81,10 +95,16 @@ just panic-scan     # No new security issues
 
 == Contractile Invariants
 
-Read `.machine_readable/MUST.contractile` before making changes.
-Key invariants that must never be violated:
+Read `.machine_readable/contractiles/must/Mustfile.a2ml` before making changes.
+The invariants specific to this project, which no change may violate:
 
-UNASSIGNED
+* the kernel never calls back into the host mid-tick (ADR-0004);
+* integer and fixed-point arithmetic only in decision paths — no `libm` (ADR-0006);
+* every struct crossing the ABI is size-checked and versioned (ADR-0005);
+* no allocation inside the tick; arenas are supplied by the caller;
+* `include/evil_weevil/ee.h` is generated — a hand edit is a defect.
+
+All of them are asserted in CI, not merely written down.
 
 == LLM/AI Agent Development
 

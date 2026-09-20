@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Architecture Decision Record: 0007-kernel-implementation-language
+
+== 7. The kernel is written in Zig, proved in Idris2, and needs nothing else
+
+Date: 2026-09-20
+
+=== Status
+
+Accepted (owner decision, 2026-09-20).
+
+=== Context
+
+The kernel must satisfy a narrow set of requirements that together eliminate most
+candidates: a stable C ABI it can *be*, no runtime or garbage collector, no allocator
+in the tick, integer-only arithmetic (ADR-0006), a WASM target without a second
+toolchain, and a resource footprint small enough to ship inside somebody else's game.
+
+The realistic candidates were Zig and Rust. Idris2 is present in this estate as the
+proof layer and was never a candidate for the runtime layer — but a proof layer with
+nothing to prove is theatre, so the choice of implementation language decides whether
+the Idris2 half of the seam is load-bearing.
+
+=== Decision
+
+1. The kernel and the FFI layer are **Zig**. Zig is already the estate's
+   zero-overhead FFI implementation layer; it emits C ABI natively, has no hidden
+   allocator or runtime, gives comptime layout assertions for free, and compiles to
+   both a native shared library and WASM (modes A and C) from one source.
+2. The **ABI contract is written in Idris2** (`src/interface/Abi/`), and the C header is
+   generated from it (ADR-0005). Layout, enum exhaustiveness, pointer-escape freedom
+   and tick purity are proved there, not tested.
+3. Rust is **not** used in the kernel. This is a decision about the runtime layer, not a
+   verdict on the language: adapters and tooling may use whatever the host requires,
+   and a Rust/Bevy adapter is planned.
+4. Rationale recorded here rather than in a comment, because "why not Rust" will be
+   asked again.
+
+=== Consequences
+
+==== Positive
+
+* One implementation of the seam, in Zig, is both the native library and the WASM
+  module — no parallel build for mode C.
+* No borrow-checker-driven restructuring of an integer-only tick loop, and no
+  `no_std` gymnastics: Zig's model is already "there is no runtime".
+* The Idris2 proofs have something concrete to be about (the generated header), which
+  is what makes them more than documentation.
+* Consistent with the estate's existing "Idris inside, Zig zero-overhead FFI" spine,
+  so this repo does not introduce a third philosophy.
+
+==== Negative
+
+* Zig's ecosystem is thinner than Rust's for the parts that are not the kernel: the
+  workbench (Phase 3) has no mature GUI or sim tooling in Zig, and will likely be
+  written elsewhere and speak to the kernel through the same ABI every host uses —
+  a constraint we accept, and arguably a healthy one.
+* Fewer contributors know Zig than Rust, and the comptime-heavy style has a learning
+  curve.
+* Zig is pre-1.0: a breaking language change is a real risk, bounded by the fact that
+  the kernel is a single dependency-free artefact pinned in `mise.toml`.
+
+==== Neutral
+
+* If the workbench needs Rust, it is an *adapter*, and adapters prove themselves
+  against the conformance kit like any other host. That keeps the boundary honest:
+  nothing we build is exempt from the interface we impose on everybody else.

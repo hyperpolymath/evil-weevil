@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Architecture Decision Record: 0006-determinism-policy
+
+== 6. Determinism is a hard constraint on the kernel
+
+Date: 2026-09-20
+
+=== Status
+
+Accepted.
+
+=== Context
+
+Enemy AI is usually where floating-point accumulates, iteration order leaks in from a
+hash map, and "it plays differently on the other machine" is discovered in a bug report
+rather than in review. Meanwhile this project wants three things that all depend on
+reproducibility: a test suite that can assert on behaviour at all, a server that can
+re-simulate what a client's enemies did, and difficulty calibration that means anything
+offline.
+
+Determinism is also in direct tension with convenience: `libm` is right there,
+floating-point is pleasant, and the workbench wants to look smooth.
+
+=== Decision
+
+1. **Integer and fixed-point arithmetic only** in the kernel. No `libm`, no
+   floating-point in decision-making paths (presentation — smoothing, animation
+   blending — belongs to the host adapter and is not part of the tick).
+2. **Seeded, explicit RNG** owned by the kernel; no global RNG, no hashing of
+   addresses, no iteration over unordered containers in a decision path.
+3. **Golden replay corpus in CI**: scenarios in, intent traces out, hashes compared
+   across platforms. A changed hash is either a bug or a deliberate, reviewed change.
+4. **Hard per-agent tick budget with a budget guard**: the agent degrades its own
+   behaviour (LOD, cheaper decision path) instead of overrunning the frame.
+5. Property tests assert the invariants that matter: intents stay within the
+   host-declared capability set, state serialises and deserialises byte-identically,
+   and no agent exceeds its budget.
+
+=== Consequences
+
+==== Positive
+
+* Behaviour is assertable in CI, so "the enemy got dumber at 3am" becomes a failing
+  hash instead of a playtest rumour.
+* Server-authoritative deployment becomes possible at all: a host can re-simulate and
+  compare.
+* Cross-platform replay makes bugs reproducible on the machine that can debug them.
+* Offline difficulty calibration produces numbers that mean the same thing at runtime.
+
+==== Negative
+
+* Fixed-point arithmetic is more work: ranges must be chosen, overflow reasoned about,
+  and trigonometry implemented and tested against a fixed contract rather than reused
+  from a standard library.
+* Third-party libraries that use floating-point cannot be linked into the kernel,
+  even convenient ones.
+* Presentation smoothness must be reconstructed in the adapter, which means the
+  workbench and the game do not share that code.
+
+==== Neutral
+
+* A deterministic kernel is a precondition for mode C (bytecode) behaving identically
+  to mode A, rather than merely similarly.

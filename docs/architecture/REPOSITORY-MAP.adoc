@@ -117,15 +117,11 @@ predecessors did.
 | yes
 | -
 
-| `archetypes/`
-| optional
-| template-only variation seam (ADR-0003); `just repo-init` removes it from minted repos
-
 | `benches/`
 | optional
 | Cargo-conventional at package root
 
-| `build`
+| `build/`
 | yes
 | build orchestration: just/ phase modules, container/, docs-seed/, templates/, guix.scm (canon 1.2.1 guix-primary template_ref = build/)
 
@@ -141,6 +137,10 @@ predecessors did.
 | yes
 | human documentation
 
+| `evil-weevil_chora.deed`
+| yes
+| the repo deed: universal AI entry point; family-7 allocation manifest + ply tree folded in (standards#837 pilot). Filename carries the repo slug (deed dispatch <stem>_chora.deed), so repo-init renames it at mint
+
 | `examples/`
 | optional
 | Cargo-conventional at package root
@@ -152,10 +152,6 @@ predecessors did.
 | `mise.toml`
 | yes
 | pinned toolchains
-
-| `evil-weevil_chora.deed`
-| yes
-| the repo deed: universal AI entry point; family-7 allocation manifest + ply tree folded in (standards#837 pilot). Filename carries the repo slug (deed dispatch <stem>_chora.deed), so repo-init renames it at mint
 
 | `scripts/`
 | yes

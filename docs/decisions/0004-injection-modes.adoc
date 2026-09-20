@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Architecture Decision Record: 0004-injection-modes
+
+== 4. Three injection modes, one kernel, and no callbacks mid-tick
+
+Date: 2026-09-20
+
+=== Status
+
+Accepted.
+
+=== Context
+
+The project claims to be *universally injectable* into computer games. That claim is
+either a design constraint or marketing, and the difference is whether the kernel can
+serve hosts with wildly different constraints:
+
+* a game we can rebuild and link against (native engine, shipped binary);
+* a game we cannot rebuild at all — mod sandboxes, managed runtimes, hosts whose
+  anti-cheat forbids arbitrary native code;
+* a host that accepts only a data blob (browser play, some engines' scripting sandboxes).
+
+The tempting design is to let the kernel query the host on demand — "give me a
+raycast", "list entities in radius", "play this animation" — because it makes the
+engine-facing code feel natural. It is also the design that forces a different kernel
+per host: those queries presuppose an in-process host on the same thread, and they
+reintroduce reentrancy into a system that must be replayable.
+
+=== Decision
+
+1. The kernel supports exactly three injection modes — in-process library (A), sidecar
+   process over shared memory (B), bytecode blob (C) — and all three run *the same
+   kernel*, differing only in transport.
+2. **The kernel never calls back into the host mid-tick.** Host state enters once per
+   tick as a validated snapshot; the kernel returns an intent. No host callbacks,
+   no reentrancy, no host queries during decision-making.
+3. The host declares its *capabilities* at init. The kernel degrades along a
+   documented ladder (for example: no navmesh implies steering over a waypoint graph)
+   rather than aborting.
+
+=== Consequences
+
+==== Positive
+
+* One implementation, three transports. Mode B and C are transport adapters, not forks.
+* Deterministic by construction: the tick is a function of declared inputs, so a replay
+  reproduces it exactly — which is also what makes the kernel safe to run
+  server-authoritative.
+* Testability without a game: a null host that publishes synthetic snapshots exercises
+  the whole kernel, so CI needs no engine.
+
+==== Negative
+
+* The snapshot buffer is a real cost — an agent does not see the engine's live entity
+  graph, so the host must decide what to publish, and we must keep the published
+  vocabulary small enough that hosts can populate it cheaply.
+* Mode B carries about a frame of latency, so behaviours that need sub-frame
+  reaction time cannot be expressed the same way.
+* Hosts with genuinely exotic query models are served worse than they would be by a
+  bespoke integration. We accept that, and the support matrix will say so.
+
+==== Neutral
+
+* Mid-tick host queries remain possible later as an *optional capability* that turns
+  off determinism for that agent — but only if a real host demands it, and it would be
+  a new ADR, not a quiet exception.

@@ -6,13 +6,13 @@
 [receipt]
 schema = "hyperpolymath.coaptation/1"
 repo = "evil-weevil"
-band = "amber"
-proposed-action = "advisory — soft drift within bands (posture/intend). Open an advisory issue; no re-anchor."
+band = "green"
+proposed-action = "none — the descriptile self-model coapts with the contractile set-point within tolerance."
 
 [coverage]
-clauses-total = 50
-descriptile-witnessed = 3
-probe-deferred-to-hunt = 22
+clauses-total = 52
+descriptile-witnessed = 4
+probe-deferred-to-hunt = 24
 must-trust-unmeasured-gaps = 0
 note = "Yard sees descriptile evidence only; probe-deferred obligations need a Hunt-tier run for a full hard-gate."
 
@@ -21,13 +21,13 @@ grade = "boolean_gate / boolean_gate_provenance"
 witnessed = 3
 refuted = 0
 unmeasured-gaps = 0
-probe-deferred = 22
+probe-deferred = 24
 gate = "pass"
 
 [reading.adjust]
 grade = "posture (advisory; accessibility / inclusive design)"
-satisfied = "0/1"
-posture-ok = false
+satisfied = "1/1"
+posture-ok = true
 
 [reading.intend]
 grade = "tropical (min-plus distance-to-north-star; wishes excluded)"
@@ -54,7 +54,7 @@ intend.ecosystem-visualization = wish:declared
 must.license-present = probe-deferred
 must.readme-present = probe-deferred
 must.security-policy = probe-deferred
-must.ai-manifest = probe-deferred
+must.repo-deed = probe-deferred
 must.governance-docs = probe-deferred
 must.machine-readable-dir = witnessed
 must.contractiles-complete = probe-deferred
@@ -64,7 +64,6 @@ must.six-directory-present = witnessed
 must.anchors-directory = witnessed
 must.self-validating-structure = probe-deferred
 must.no-placeholder-values = probe-deferred
-must.template-readonly = probe-deferred
 must.no-untracked-contractiles = probe-deferred
 must.signed-commits = probe-deferred
 trust.no-secrets-committed = probe-deferred
@@ -76,7 +75,10 @@ trust.template-files-readonly = probe-deferred
 trust.trust-deny-areas = probe-deferred
 trust.container-images-pinned = probe-deferred
 trust.no-dockerfile = probe-deferred
-adjust.placeholder-drift = refuted
+trust.site-security-headers = probe-deferred
+trust.site-well-known = probe-deferred
+trust.site-resource-records = probe-deferred
+adjust.placeholder-drift = witnessed
 adjust.template-version-drift = unmeasured
 adjust.readme-completeness = unmeasured
 adjust.example-accuracy = unmeasured
@@ -87,7 +89,7 @@ adjust.spdx-header-consistency = unmeasured
 dust.no-template-artifacts = expected
 dust.no-example-placeholders = expected
 dust.no-old-contractile-formats = expected
-dust.no-duplicate-justfile = expected
+dust.justfile-imports-in-sync = expected
 dust.no-duplicate-readme-format = expected
 dust.no-stale-template-references = expected
 dust.version-sync-checked = expected
@@ -96,5 +98,5 @@ bust.sync-drift-between-repos = latent
 bust.contractile-parse-error = latent
 
 [provenance]
-contractiles = "intend@b5248bb14c9b must@deb0cb5de0b2 trust@76884f439a88 adjust@8faad9ca0650 dust@8ce4f3c1efa0 bust@dd6a53e1fc9b"
-descriptiles = "clade@b974798d108a state@9fbef88c72f8 ecosystem@1c30abd8f618 agentic@d72859864bbe anchor@8b66b03d7736"
+contractiles = "intend@c961be075f40 must@4593727396e3 trust@9df80a5f8918 adjust@7c10c592e85e dust@969a7f90fa77 bust@67f163398771"
+descriptiles = "clade@7f64c220acdf state@0280cc7ad06e ecosystem@2b0e6190b9bc agentic@89960466d05d anchor@66b0bf13704c"

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
 // Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-// Template: QUICKSTART-MAINTAINER.adoc — packaging, deploying, and maintaining
-// Replace evil-weevil, UNASSIGNED, UNASSIGNED with actuals
+// evil-weevil maintainer quick start — packaging, deploying, and maintaining
 = evil-weevil — Quick Start for Platform Maintainers
 :toc:
 :toclevels: 2
@@ -13,7 +12,9 @@ distribution on your platform.
 
 == Runtime Dependencies
 
-UNASSIGNED
+*None.* The shipped artefact is a C ABI shared library with no runtime dependencies
+beyond the platform C library (ADR-0007). There is no interpreter, no VM, no garbage
+collector and no daemon. The kernel allocates only from arenas the host supplies.
 
 == Build from Source
 
@@ -24,7 +25,17 @@ cd evil-weevil
 just build-release
 ----
 
-Output: `UNASSIGNED`
+Output (once Phase 1 lands — not built yet):
+
+[cols="1,1"]
+|===
+| Platform | Artefact
+
+| Linux   | `lib/libevil_weevil.so`
+| macOS   | `lib/libevil_weevil.dylib`
+| Windows | `bin/evil_weevil.dll`
+| WASM    | `evil_weevil.wasm` (injection mode C)
+|===
 
 == Packaging
 
@@ -56,27 +67,26 @@ Files installed:
 |===
 | Path | Contents
 
-| `$PREFIX/bin/`
-| Executables
+| `$PREFIX/lib/`
+| `libevil_weevil.so` (+ `.a` if a static archive is offered)
 
-| `$PREFIX/share/UNASSIGNED/`
-| Data files, assets
+| `$PREFIX/include/evil_weevil/`
+| `ee.h` — the generated C ABI header hosts and adapters compile against
 
-| `$PREFIX/share/doc/UNASSIGNED/`
+| `$PREFIX/share/doc/evil-weevil/`
 | Documentation
-
-| `$PREFIX/share/applications/`
-| .desktop file (Linux, if GUI)
-
-| `$PREFIX/share/man/man1/`
-| Man pages
 |===
+
+There is no `bin/` entry, no `.desktop` file and no man page: this is a library that a
+host game loads, not an application.
 
 == Configuration
 
-Default config location: `$XDG_CONFIG_HOME/UNASSIGNED/config.toml`
-
-Fallback: `$HOME/.config/UNASSIGNED/config.toml`
+There is no config file, no state directory and no environment variable. All
+configuration is passed to `ee_init` by the host: declared ABI version, declared
+capabilities (navmesh, line-of-sight queries, physics raycasts, waypoint graph, spawn
+rights), budget, and the arena allocator. A library that writes to `$XDG_CONFIG_HOME`
+inside somebody else's game is a surprise, not a feature.
 
 == Health Checks
 
@@ -96,7 +106,7 @@ just build-release
 just install --prefix=/usr/local
 ----
 
-Or via OPSM: `opsm update UNASSIGNED`
+Or via OPSM: `opsm update evil-weevil`
 
 == Security Notes
 
@@ -107,15 +117,11 @@ Or via OPSM: `opsm update UNASSIGNED`
 
 == Multi-Instance Deployment
 
-For deploying multiple instances (e.g., different users or tenants):
-
-[source,bash]
-----
-just install --prefix=/opt/UNASSIGNED-instance1 --config=/etc/UNASSIGNED/instance1.toml
-just install --prefix=/opt/UNASSIGNED-instance2 --config=/etc/UNASSIGNED/instance2.toml
-----
-
-Each instance has isolated config, data, and logs.
+Not applicable, and deliberately so. The library keeps no global state and writes
+nothing outside the memory the host lends it, so instances are isolated by construction:
+each host process links or loads its own copy, and two games on one machine cannot
+interfere. If a deployment needs per-tenant tuning, that is configuration passed to
+`ee_init`, not a second installation.
 
 == Reporting Issues
 

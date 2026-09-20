@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Architecture Decision Record: 0005-abi-versioning
+
+== 5. The C ABI is versioned, size-checked and generated — never hand-edited
+
+Date: 2026-09-20
+
+=== Status
+
+Accepted.
+
+=== Context
+
+The value of this project rests on one surface: `ee.h`. Every adapter, in every
+language, is written against it. The failure mode is well known and expensive — an
+ABI that drifts silently between kernel and adapter produces hosts that link
+successfully and misbehave at runtime, in the field, on somebody else's game.
+
+Idris2 and Zig are already in this repo precisely to make layout claims provable. The
+open question is what the *contract* around that header is: who may change it, how a
+host learns it is incompatible, and what happens when versions disagree.
+
+=== Decision
+
+1. `include/evil_weevil/ee.h` is **generated** from the Idris2 types in
+   `src/interface/Abi/` and implemented in `src/interface/ffi/` (Zig). Any hand edit is
+   a defect; CI regenerates and fails on a diff.
+2. Every struct passed across the boundary carries its size and a version field. The
+   kernel validates both at `ee_init` and refuses (with a diagnosable error code)
+   rather than proceeding on a guess.
+3. Versioning is a **handshake**, not a number to compare in documentation:
+   `ee_init` receives the host's declared version and capabilities and returns what the
+   kernel will and will not honour. Capability mismatch is degradable; ABI mismatch is
+   fatal and says why.
+4. **No exceptions, no unwinding, no allocation across the boundary.** Panics trap at
+   the seam and are reported as an error code; the kernel is built without an
+   allocator, using caller-supplied arenas.
+5. Additive changes ship as a minor version; anything that changes an existing field's
+   meaning, size or offset is a major version and requires a new ADR.
+
+=== Consequences
+
+==== Positive
+
+* A host cannot silently link against the wrong ABI — the failure is loud, at init,
+  with a message.
+* The Idris2 layout proofs give the header a single source of truth that a test cannot
+  accidentally bless.
+* Generated bindings for C#, GDScript, and C++ stay in lockstep with the C ABI, so
+  adapter work stays mechanical.
+
+==== Negative
+
+* Code generation adds a step to every build and a non-obvious dependency: changing a
+  struct in Zig is meaningless until the Idris2 type changes too.
+* Size-checked structs cost a little ceremony at every entry point.
+* Freezing the header in Phase 1 will feel premature, and it is deliberate: unfreezing
+  it later costs adapters, not lines.
+
+==== Neutral
+
+* The conformance kit (Phase 4) is where adapters prove they honour the handshake; a
+  host that passes it is "verified", a host that merely links is "best effort".

@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Mint notes — evil-weevil from rsr-template-repo
+:toc:
+
+Measured on this repo's own mint, 2026-09-20.
+
+*Parent:* `rsr-template-repo` · *parent-pin:* `06d8c9f7a8d2` (recorded in
+`.machine_readable/descriptiles/VARIANT.a2ml`) · *outcome:* mint exit 0,
+`just verify` PASS, all placeholders replaced.
+
+This file exists because a mint is not finished when the script exits 0. It is finished
+when the repo stops describing itself as something else.
+
+== 1. Toolchain the mint needs
+
+`just repo-init` is not a pure-shell operation:
+
+[cols="1,3"]
+|===
+| Tool | Why
+
+| `just` | the task runner; every phase is a recipe
+| `rustc` | `scripts/rust-tool.sh` compiles two single-file Rust mint tools on demand
+  (`strip-instruction-blocks`, `prune-dependabot-ecosystems`). A cached binary needs no
+  toolchain; a cold cache does.
+| `uuidgen` | derives the repo's UUIDv5 identity (`--sha1 --namespace @url --name`)
+| `nickel` | *not* needed to mint, but needed by `just claude-md` to compile the arrival pack
+|===
+
+On a machine without them, the mint fails partway through — after substitution has
+already begun — which is the worst place to stop.
+
+=== Identity maths, checked
+
+[source]
+----
+uuid5(NAMESPACE_URL, "github.com/metadatastician/evil-weevil")
+  = 87120fab-5ff8-57c0-8a5d-2cc9110f93e0
+----
+
+Derived independently and by the template's own `uuidgen` path; identical. The
+derived-not-invented identity model holds, and `.machine_readable/descriptiles/CLADE.a2ml`
+records how to recompute it.
+
+== 2. The one trap, and it is documented
+
+**Do not set `RSR_NON_INTERACTIVE=1`.** The template says so itself
+(`README.adoc`, `docs/AI_INSTALLATION_GUIDE.adoc`) and the reason is in
+`build/just/repo-init.just`:
+
+[source,bash]
+----
+if [ -n "${RSR_NON_INTERACTIVE:-}" ]; then
+    read() { return 0; }   # intended: silence the prompts
+fi
+----
+
+That stub does not silence prompts; it replaces `read` for *every* `read` in the
+script, including the file-walking loops (`find ... | while read -r file; do ... done`).
+Two failures at once: the loop variable is never assigned (so `set -u` reports
+`file: unbound variable`), and `read` returns success **without consuming stdin**, so
+the loop never terminates. Measured: the substitution pass never runs and the process
+spins until killed. Repro in twelve lines: the same loop behaves correctly the moment
+the stub is removed.
+
+*Consequence for us:* the mint is driven by piping 18 answers to stdin. The recipe's
+stale "Non-interactive support" comment promises a mode that does not work, and the
+honest fix upstream is to make the flag fail loudly or delete it — a flag that silently
+converts a mint into an infinite loop is worse than no flag.
+
+== 3. What survives a successful mint
+
+The substitution pass fills `{{TOKEN}}`-shaped text. The self-name pass rewrites the
+*literal* `rsr-template-repo` and the owner literal. Everything else is left as
+written — so free-form self-description prose is in neither net, and a freshly minted
+repo keeps asserting that it *is* the template.
+
+[cols="1,2,2"]
+|===
+| # | What survived | Why it matters / how it was repaired
+
+| 1
+| `STATE.a2ml` `purpose`; the whole `[route-to-mvp]` milestone list; `[blockers-and-issues]`
+| The repo described the *template's* evolution as its own, at 97% complete. Rewritten
+  to evil-weevil's purpose and the seven-phase route, with an honest completion number.
+
+| 2
+| `ECOSYSTEM.a2ml` `purpose`, `what-this-is-not`, `[pipeline]`, `[related-projects]`
+| Claimed to be scaffolding for every estate repo. Rewritten; `what-this-is-not` now
+  carries this project's real boundaries.
+
+| 3
+| `sonar-project.properties` header comment
+| `id=hyperpolymath_evil-weevil` while `sonar.projectKey` was correctly
+  `metadatastician_evil-weevil`. Same defect family as `metadatastician/first-post#11`.
+  Repaired.
+
+| 4
+| `CLAUDE.md` (the agent arrival pack)
+| Carried the *template's* uuid, clade `rm`, and birth date — in the entry point agents
+  are told to read first. Regenerated with `just claude-md` after (1) and (2) were fixed
+  and the clade was chosen; the pack now reports uuid `87120fab-…`, clade `gm`.
+|===
+
+Also done at mint: `.machine_readable/ai/PLACEHOLDERS.adoc` removed (template cruft), the
+placeholder ORCID dropped from `CITATION.cff` rather than left as
+`0000-0000-0000-0000`, and the clade chosen (`gm`, with the rationale recorded in
+`CLADE.a2ml` — the template deliberately fails `CLADE-003`/`CLADE-006` until a human picks).
+
+== 4. Order of operations that actually works
+
+[source,bash]
+----
+# 1. Mint (never RSR_NON_INTERACTIVE):
+just repo-init < answers.txt        # 14 identity/description + 3 container + confirm
+# 2. Repair descriptiles (STATE, ECOSYSTEM), then choose the clade:
+#    edit .machine_readable/descriptiles/{STATE,ECOSYSTEM,CLADE}.a2ml
+# 3. Initialise git, because the arrival pack wants a repository:
+git init -b main && git add -A && git commit -m "chore: mint"
+# 4. Regenerate everything derived, in this order:
+just claude-md && just coapt && just repo-map
+# 5. Gate:
+just validate
+----
+
+Step 3 before step 4 is not optional: `generate.sh` calls `git rev-parse --show-toplevel`
+and dies outside a work tree. Step 4's order matters because `validate-claude-md`,
+`validate-coapt` and `validate-repo-map` each fail on a stale artifact — which is the
+point of them.
+
+== 5. For the estate
+
+Two things are worth carrying upstream to `rsr-template-repo`:
+
+. `repo-init` should either repair the descriptile self-descriptions or print them as
+  required post-mint actions. A mint that is 97% complete as somebody else's template is
+  the same *class* of defect as the 211-repo placeholder drift the estate already paid for.
+. `CLAUDE.md` should be regenerated as part of the mint. It is the file agents read
+  first, and it shipped here with the wrong uuid, the wrong clade and the wrong IS-NOT
+  boundary.

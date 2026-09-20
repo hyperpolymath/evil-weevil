@@ -1,0 +1,181 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Evil Weevil — development plan
+:toc:
+:toclevels: 3
+
+*Clade:* `gm` (Games & Interactive) · *Phase:* 0 (identity) · *Written:* 2026-09-20
+
+== The claim, and how we keep it honest
+
+The hard word in this project is **universally**. Any engine can grow an enemy AI;
+the claim only becomes real if one kernel runs unmodified inside very different hosts.
+So the claim is made falsifiable from the first commit.
+
+[cols="1,2,2"]
+|===
+| Mode | When it is the only option | Cost
+
+| *A. In-process library*
+| You can rebuild or link the game.
+| Fastest; the default.
+
+| *B. Sidecar process*
+| You cannot rebuild: mod sandboxes, managed runtimes, anti-cheat-constrained hosts.
+| About one frame of latency; same kernel, no code changes.
+
+| *C. Bytecode blob* (WASM)
+| The host accepts only a data blob; also browser play.
+| Slowest; same kernel.
+|===
+
+Two consequences shape everything else:
+
+. **The kernel never calls back into the host mid-tick.** The host publishes a
+  validated snapshot; the kernel returns intents. No callbacks, no reentrancy, no
+  "raycast me a line" in the middle of deciding. This is what keeps A/B/C one
+  implementation instead of three.
+. **Capability negotiation, not an assumed engine.** At init the host declares what it
+  has — navmesh, line-of-sight queries, physics raycasts, waypoint graph, spawn rights
+  — and the kernel degrades along a documented ladder instead of aborting.
+
+=== Boundaries we hold deliberately
+
+Not a game engine (no rendering, physics, networking, scene graph). Not a cheat
+framework and not an anti-cheat bypass: the kernel must be safe to run
+server-authoritative, which is precisely why determinism is non-negotiable. Not a
+general-purpose planner for non-game domains. These are recorded as `what-this-is-not`
+in `.machine_readable/descriptiles/ECOSYSTEM.a2ml`, where a gate can cite them.
+
+== Architecture: three layers, one seam
+
+[source]
+----
+host adapters        Godot 4 (GDExtension) · Unity (C# P/Invoke) · Unreal (C++ module)
+(thin, per-engine)   native Rust/Bevy · null host (tests) · WASM
+      |  every adapter passes the same conformance kit
+      v
+=== SEAM (frozen, versioned) ================================================
+    include/evil_weevil/ee.h    generated from the Idris2 types — never hand-edited
+    src/interface/Abi/          Idris2: struct layout, enum exhaustiveness,
+                                tick purity and the determinism contract
+    src/interface/ffi/          Zig: the C ABI, comptime layout assertions, no allocator
+=== KERNEL (host-agnostic) ==================================================
+    perception -> memory -> decision -> action/steering
+    fixed tick, integer-only math, seeded RNG, per-agent budget guard
+=== AUTHORING ==============================================================
+    enemy definition (a2ml) -> compiler -> workbench: headless sim + replay inspector
+----
+
+The RSR spine already reserves exactly these surfaces (`src/interface/`, `src/core/`,
+`src/contracts/`, `verification/`); we fill in the template's own layout rather than
+inventing one.
+
+*The seam is frozen before any behaviour code is written.* A v0 `ee.h` — capability
+flags, snapshot layout, intent layout, arena allocator, one `ee_tick()` entrance —
+plus a null host that drives 10,000 ticks in CI. Everything downstream is written
+against that header.
+
+=== Why Idris2 *and* Zig
+
+Idris2 is the proof layer, Zig is the implementation layer, and neither is negotiable
+in the other's role. Idris2 proves the things that no test can: that the C struct
+layout matches what the kernel and every adapter believe, that enums are exhaustive,
+that no host pointer escapes into kernel state, and that the tick is pure with respect
+to declared inputs. Zig gives a zero-overhead, dependency-free C ABI with comptime
+layout assertions, and compiles to WASM (mode C) without a second toolchain. The proof
+layer is what makes "universally injectable" checkable rather than aspirational.
+
+== Determinism is the feature, not a nicety
+
+* Integer and fixed-point maths only in the kernel — no `libm` — so replays are
+  bit-exact across platforms, compilers and injection modes.
+* A *golden replay corpus* in CI: scenarios in, intent traces out, hashes compared.
+* Property tests: intents always lie within the host-declared capability set; agent
+  state round-trips through serialisation byte-identically; no agent exceeds budget.
+* A *budget guard* that degrades behaviour (LOD, cheaper decision path) instead of
+  overrunning the frame. An enemy that costs the frame is worse than one that thinks
+  less.
+
+Determinism is also what lets a server re-simulate exactly what a client's enemies did
+— the precondition for shipping this in anything multiplayer.
+
+== Phases, with exit criteria
+
+We do not advance on vibes. Each phase has a gate that can fail.
+
+[cols="1,2,3"]
+|===
+| Phase | Scope | Exit criteria
+
+| *0. Identity* (done)
+| Mint from the RSR template; repair mint drift; choose the clade; commit.
+| `just validate` green; no template self-description left in the tree; clade chosen.
+
+| *1. The seam*
+| `ee.h` v0, Idris2 layout and purity proofs, Zig C ABI, null host, C harness.
+| 10,000-tick harness green; header regenerates byte-identical; a deliberate layout
+  break fails the Idris2 proof.
+
+| *2. Kernel v0*
+| Perception and memory, utility plus behaviour graph, steering, budget guard.
+| Golden replays bit-exact on two platforms; budget guard demonstrably degrades
+  instead of overrunning.
+
+| *3. Authoring*
+| Enemy definition schema (a2ml), compiler, workbench, replay inspector.
+| A designer authors a new enemy archetype without touching code, and watches it
+  fight in the workbench.
+
+| *4. Adapters*
+| Reference adapter, then Godot, Unity, Unreal, WASM.
+| Every adapter passes one conformance kit. An adapter that needs kernel changes is
+  rejected, not accommodated.
+
+| *5. Populations*
+| Squads and roles, spawn director, threat curve, crowd LOD.
+| The director produces a readable difficulty ramp from a single authored curve.
+
+| *6. The weevil*
+| Adaptive and adversarial behaviour, offline difficulty calibration.
+| Calibrated offline, deterministic at runtime, replayable.
+|===
+
+Phase 3 is what makes this *support for enemy creation* rather than an AI library: the
+unit of delivery to a designer is a workbench, not a header file.
+
+== Risks
+
+[cols="1,2"]
+|===
+| Risk | Mitigation
+
+| ABI churn breaks every adapter
+| Freeze early. Version handshake, size-checked structs, generated header as the single
+  source of truth. Adapters may never force a kernel change.
+
+| "Universal" overclaiming
+| Publish a support matrix of verified versus best-effort hosts. Today it is empty, and
+  says so.
+
+| Adapter sprawl
+| One conformance kit; nothing ships without passing it; adapters stay dumb.
+
+| Tick budget versus fidelity
+| Budget guard and LOD land in Phase 2, not retrofitted after a demo stalls.
+
+| Exotic toolchains (Idris2, Zig)
+| Required only by our CI. Hosts only ever need a C ABI, and mode B/C hosts need nothing
+  at all.
+
+| Mint drift (measured — see MINT-NOTES)
+| Repairs are written down as a checklist so the next mint does not repeat them.
+|===
+
+== Working practice in this estate
+
+`evil-weevil_chora.deed` and `CLAUDE.md` are the entry points for any agent; the
+generated region of `CLAUDE.md` is compiled from the descriptiles, so it cannot drift.
+Load-bearing decisions get an ADR (0004 injection modes, 0005 ABI versioning, 0006
+determinism) rather than a comment. Each phase closes with an `AFFIRMATION`: a dated,
+signed honesty snapshot. No phase claims "it should work".

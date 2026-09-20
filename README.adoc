@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
 // Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-// SPDX-FileCopyrightText: 2024-2026 Jonathan D.A. Jewell (hyperpolymath)
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (metadatastician)
 = Evil Weevil
 :toc:
 :toc-placement: preamble
@@ -21,43 +21,84 @@ image:https://img.shields.io/badge/Idris-Inside-5E5086?logo=idris&logoColor=whit
 image:https://img.shields.io/badge/Zig-Zero--overhead-F7A41D?logo=zig&logoColor=black[Zig Zero-overhead FFI,link="https://github.com/hyperpolymath/typed-wasm"]
 image:https://api.thegreenwebfoundation.org/greencheckimage/github.com[Green Web,link="https://www.thegreenwebfoundation.org/green-web-check/?url=github.com"]
 
-A universally injectable enemy-intelligence kernel for computer games: host-agnostic and deterministic, with an Idris2-verified ABI over a Zig zero-overhead FFI seam, supporting enemy creation across engines.
+A universally injectable enemy-intelligence kernel for computer games: host-agnostic
+and deterministic, with an Idris2-verified C ABI over a Zig zero-overhead FFI seam,
+so enemy behaviour is authored once and injected into whatever engine the game
+already uses.
 
 [IMPORTANT]
 ====
-*This file is a template.* You are reading `README.adoc` from the *RSR template repo*
-(or a freshly-cloned copy of it). Run `just repo-init` to replace every `{{PLACEHOLDER}}`
-token with your project's details, then delete this admonition. Until you do, the
-`{{...}}` markers below are intentional placeholders, not content.
+*Status: Phase 0 — identity only. There is no kernel code yet.* This repository was
+minted from the RSR template on 2026-09-20; what exists today is governance, CI,
+machine-readable metadata and an empty, reserved ABI/FFI seam. No behaviour, no
+adapter, and no support matrix entry is claimed. `STATE.a2ml` carries the live
+number (currently 2%), and `docs/developer/DEVELOPMENT-PLAN.adoc` carries the route.
 ====
 
 == What this is
 
-A new repository scaffolded from the *Rhodium Standard Repository (RSR)* template:
-a batteries-included starting point that ships with CI/CD, machine-readable project
-metadata, an AI-agent gatekeeper protocol, a formally-typed ABI/FFI seam
-(Idris2 + Zig), container and reproducible-build scaffolding, and governance
-infrastructure — all wired and passing the RSR validators on day one.
+Most game AI is welded to one engine. Evil Weevil inverts that: the intelligence is
+a *kernel* that the game **hosts**, not a library the game is **built around**.
 
-Replace this section with a description of *your* project once initialised.
+The kernel owns perception memory, decision-making (utility scoring over a behaviour
+graph), steering and a tick budget. It owns no rendering, no physics, no scene graph,
+and no networking. The host supplies world data once per tick as a validated
+snapshot; the kernel returns intents. It never calls back into the host mid-tick —
+which is the single decision that lets one implementation serve very different hosts.
 
-== Quick start
+== Injection modes
 
-[source,bash]
+[cols="1,3"]
+|===
+| Mode | Trade-off
+
+| *A. In-process library* (C ABI: `.so`/`.dll`/`.dylib`)
+| The default and the fastest. Requires linking or loading a native library.
+
+| *B. Sidecar process* (shared memory + ring buffer)
+| For hosts that cannot rebuild: mod sandboxes, managed runtimes, anti-cheat-constrained
+  environments. Costs about a frame of latency and no kernel changes.
+
+| *C. Bytecode blob* (WASM / small VM)
+| For hosts that only accept a data blob, and for browser play. Slowest; same kernel.
+|===
+
+A host declares its *capabilities* at init — navmesh, line-of-sight queries, physics
+raycasts, waypoint graph, spawn rights — and the kernel degrades gracefully
+(navmesh absent implies steering plus a waypoint graph) rather than aborting.
+The word "universally" is only meaningful against that ladder.
+
+== Architecture
+
+[source]
 ----
-# 1. Create a repo from this template (or clone it), then from the repo root:
-just repo-init                # interactive bootstrap: fills every {{PLACEHOLDER}}
-
-# 2. See the available tasks:
-just                     # lists all phases (build, test, validate, audit, ...)
-
-# 3. Check the repo still satisfies the RSR shape:
-just validate            # structure + metadata checks
+host adapters        Godot 4 · Unity · Unreal · native Rust/Bevy · null host · WASM
+  (thin, per-engine) each must pass the same conformance kit
+        |
+        v
+  === SEAM (frozen, versioned) =============================================
+      include/evil_weevil/ee.h      generated from the Idris2 types, never hand-edited
+      src/interface/Abi/            Idris2: struct layout proofs, enum exhaustiveness,
+                                    tick purity and determinism contract
+      src/interface/ffi/            Zig: the C ABI, comptime layout assertions
+  === KERNEL (host-agnostic) ===============================================
+      perception -> memory -> decision -> action    fixed tick, integer-only math
+      behaviour graph + utility scoring, seeded RNG, per-agent budget guard
+  === AUTHORING ============================================================
+      enemy definition (a2ml) -> compiler -> workbench: headless sim + replay inspector
 ----
 
-`just repo-init` prompts for the project name, owner, author, licence contact, and the
-other values listed in `.machine_readable/ai/PLACEHOLDERS.adoc`, substitutes them
-across the tree, validates the result, and (if available) runs the `k9-svc` checks.
+The seam is frozen in Phase 1 before any behaviour code exists. An adapter written
+against a moving header is the one mistake that would sink the whole claim.
+
+== Determinism
+
+The kernel uses integer and fixed-point maths only — no `libm` — so a replay is
+bit-exact across platforms, compilers and injection modes. That buys three things at
+once: a golden-replay corpus in CI (scenarios in, intent traces out, hashes compared),
+a server that can re-simulate exactly what a client's enemies did, and regression
+detection for "the enemy got dumber at 3am". Each agent carries a hard tick budget and
+*degrades its own behaviour* rather than blowing the frame.
 
 == AI-Assisted Installation
 
@@ -68,59 +109,54 @@ the orientation order, the full prompt sequence, and the privacy notice.
 The one trap worth stating up front: **do not set `RSR_NON_INTERACTIVE=1`**. It
 stubs the shell builtin `read`, which also disables the loops that perform token
 substitution — the run never terminates and substitutes nothing. Pipe answers to
-stdin instead.
+stdin instead. (Measured on this repo's own mint; see
+link:docs/developer/MINT-NOTES.adoc[MINT-NOTES].)
 
-== What you get
+== Working in this repo
 
-* *Machine-readable metadata* (`.machine_readable/descriptiles/`) — `STATE`, `META`,
-  `ECOSYSTEM`, `PLAYBOOK`, `AGENTIC`, `NEUROSYM`, `CLADE`, and `anchors/ANCHOR`,
-  in deed, so tools and agents can read the project's state and boundaries.
-* *AI gatekeeper protocol* — `evil-weevil_chora.deed` (the repo deed) is the
-  universal entry point that tells an AI agent how to work in this repo before it
-  touches anything; it carries the AI allocation policy and the ply directory tree.
-* *Typed ABI/FFI seam* — `src/interface/Abi/` (Idris2 type + layout proofs) over
-  `src/interface/ffi/` (Zig implementation), with generated C headers.
-* *CI/CD* — GitHub Actions for quality, security (CodeQL, Scorecard, secret
-  scanning), multi-forge mirroring, and RSR anti-pattern enforcement.
-* *Supply-chain & reproducibility* — container layering (stapeln), Guix shells,
-  SBOM, and signing hooks.
-* *Governance* — `GOVERNANCE.adoc`, `MAINTAINERS.adoc`, `.github/` community health
-  files, and a release `AUDIT.adoc` gate.
+[source,bash]
+----
+just                    # list every recipe
+just validate           # structure + metadata gates
+just claude-md          # regenerate the agent arrival pack from the a2ml descriptiles
+just repo-map           # regenerate the authoritative repository map (CI fails if stale)
+just coapt              # regenerate the coaptation receipt (CI fails if stale)
+----
+
+Agents start at `evil-weevil_chora.deed` (the repo deed) or link:CLAUDE.md[CLAUDE.md],
+not here. The generated region of `CLAUDE.md` is compiled from
+`.machine_readable/descriptiles/` — edit the a2ml, never the output.
 
 == Repository map
 
 The authoritative map is generated, so it cannot drift from the tree:
-link:docs/architecture/REPOSITORY-MAP.adoc[docs/architecture/REPOSITORY-MAP.adoc]
-(regenerate with `just repo-map`; CI fails if it is stale).
-
-The short version:
+link:docs/architecture/REPOSITORY-MAP.adoc[docs/architecture/REPOSITORY-MAP.adoc].
 
 [cols="1,3"]
 |===
 | Path | What lives there
 
-| `README.adoc`, `CLAUDE.md` | Start here - humans and AI agents respectively.
-| `src/`, `tests/`           | The code and its tests.
-| `docs/`                    | Human documentation, including the full map above.
-| `.machine_readable/`        | Manifests, contractiles and policies that tools read.
+| `README.adoc`, `CLAUDE.md` | Start here — humans and AI agents respectively.
+| `src/interface/`           | The seam: Idris2 ABI proofs over the Zig FFI, plus generated headers.
+| `src/core/`                | The host-agnostic kernel. Empty until Phase 1 exits.
+| `tests/`, `verification/`  | Tests; proofs and the golden-replay corpus.
+| `docs/`                    | Human documentation, including the development plan and ADRs.
+| `.machine_readable/`       | Descriptiles, contractiles and policies that tools and agents read.
 | `build/`, `Justfile`       | Every task runs through `just`; phases live in `build/just/`.
-| `ci/`, `.github/`          | CI configuration; GitHub reads `.github/` and no other path.
 |===
 
 == Where to go next
 
-* link:docs/architecture/REPOSITORY-MAP.adoc[The repository map] — generated; what every directory is for.
-* link:docs/EXPLAINME.adoc[EXPLAINME] — the engineering deep-dive: how the pieces actually work.
-* link:docs/AFFIRMATION.adoc[AFFIRMATION] — the dated, signed honesty snapshot of the repo's true state.
-* link:docs/AUDIT.adoc[AUDIT] — the release audit gate.
-* link:docs/AI_INSTALLATION_GUIDE.adoc[AI installation guide] — for agents instantiating this template.
-* link:.machine_readable/ai/PLACEHOLDERS.adoc[PLACEHOLDERS] — the full placeholder reference.
+* link:docs/developer/DEVELOPMENT-PLAN.adoc[Development plan] — what we are building, in what order, and what counts as done.
+* link:docs/developer/MINT-NOTES.adoc[Mint notes] — what the RSR mint did and did not do, measured on this repo.
+* link:docs/decisions/[ADRs] — 0002 variant contract, 0004 injection modes, 0005 ABI versioning, 0006 determinism.
+* link:docs/architecture/REPOSITORY-MAP.adoc[Repository map] — generated; what every directory is for.
+* link:docs/AFFIRMATION.adoc[AFFIRMATION] — the dated honesty snapshot of the repo's true state.
 
 == Licence
 
 Code, configuration and scripts are link:LICENSE[Mozilla Public License 2.0]
-(`MPL-2.0`); prose documentation is `CC-BY-SA-4.0`. Both texts live in
-`LICENSES/`, and per-file `SPDX-License-Identifier` headers are authoritative.
-The GitHub-detected licence is MPL-2.0 (the root `LICENSE`). Long-term
+(`MPL-2.0`); prose documentation is `CC-BY-SA-4.0`. Both texts live in `LICENSES/`,
+and per-file `SPDX-License-Identifier` headers are authoritative. Long-term
 attribution uses Quantum-Safe Provenance — see
 link:docs/legal/EXHIBIT-B-QUANTUM-SAFE.txt[the Quantum-Safe Provenance exhibit].
