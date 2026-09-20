@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+#
+# STATE.a2ml — Project state checkpoint
+#
+# This is the STATE file for evil-weevil itself.
+
+[metadata]
+project = "evil-weevil"
+version = "0.1.0"
+last-updated = "2026-09-20"
+# status: active | paused | archived | planned
+#   planned — the repo is RESERVED but has not started (minted as a placeholder;
+#             equivalent to CLADE [status] phase = "reserved"). It is NOT
+#             "paused": paused reads as "was active, stopped".
+# AUTHORITY: when this and CLADE [status] phase disagree, CLADE phase is the
+# authoritative SCM checkpoint and STATE must be re-derived from it — never
+# hand-edit both into agreement (standards#726).
+status = "active"
+
+[project-context]
+name = "Evil Weevil"
+purpose = "A universally injectable enemy-intelligence kernel for computer games: a host-agnostic, deterministic AI core behind an Idris2-verified C ABI over a Zig zero-overhead FFI seam, so enemy behaviour is authored once and injected into whatever engine the game already uses."
+# Phase 0 (identity) is complete; no kernel code exists yet. This number is
+# deliberately low: it counts working behaviour, not scaffolding inherited
+# from the template.
+completion-percentage = 2
+
+[position]
+phase = "design"           # design | implementation | testing | maintenance | archived
+maturity = "experimental"  # experimental | alpha | beta | production | lts
+
+[route-to-mvp]
+milestones = [
+  { name = "Phase 0: identity — minted from rsr-template-repo, drift repaired, clade chosen, gates green", completion = 100 },
+  { name = "Phase 1: the seam — ee.h v0, Idris2 layout/purity proofs, Zig FFI, null host, 10k-tick harness", completion = 0 },
+  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 0 },
+  { name = "Phase 3: authoring — enemy definition schema (a2ml), compiler, workbench and replay inspector", completion = 0 },
+  { name = "Phase 4: adapters — Godot 4, Unity, Unreal, WASM, each passing one conformance kit", completion = 0 },
+  { name = "Phase 5: populations — squads and roles, spawn director, threat curve, crowd LOD", completion = 0 },
+  { name = "Phase 6: adaptive behaviour — adversarial play, offline difficulty calibration", completion = 0 },
+]
+
+[blockers-and-issues]
+# 1. The ABI seam is unfrozen. No behaviour code and no adapter may start until
+#    Phase 1 exits: an adapter written against a moving header is the one
+#    mistake that would sink the "universally injectable" claim.
+# 2. Upstream mint defects, measured on this repo's own mint (2026-09-20) and
+#    documented in docs/developer/MINT-NOTES.adoc: (a) RSR_NON_INTERACTIVE=1
+#    cannot complete a mint; (b) template self-descriptions survive substitution
+#    (repaired here by hand — STATE, ECOSYSTEM, CLAUDE.md); (c) the SonarCloud
+#    header comment keeps the template owner (same family as
+#    metadatastician/first-post#11).
+# 3. Registration in gv-clade-index is the OWNER's act, not an agent's, and has
+#    not been done.
+
+[critical-next-actions]
+actions = [
+  "Write include/evil_weevil/ee.h v0 — capability flags, snapshot and intent layouts, arena allocator, ee_tick — and freeze it",
+  "Encode ABI layout and tick-purity invariants in Idris2 (src/interface/Abi/); implement the C ABI in Zig (src/interface/ffi/)",
+  "Build the null host plus C harness: 10,000 deterministic ticks in CI, header regeneration proven byte-identical",
+  "File the upstream mint defects against rsr-template-repo",
+  "Ratify ADR-0004 (injection modes), ADR-0005 (ABI versioning and capability negotiation), ADR-0006 (determinism policy) before Phase 2 opens",
+]
+
+[maintenance-status]
+last-run-utc = "never"
+last-report = "docs/reports/maintenance/latest.json"
+last-result = "unknown"  # unknown | pass | warn | fail
+open-warnings = 0
+open-failures = 0
+
+[ecosystem]
+part-of = ["RSR Framework"]
+# Zero runtime dependencies is a design constraint, not an accident: the kernel
+# must inject into a host that has nothing else installed. Provenance (the
+# template it was minted from) lives in VARIANT.a2ml, not here.
+depends-on = []

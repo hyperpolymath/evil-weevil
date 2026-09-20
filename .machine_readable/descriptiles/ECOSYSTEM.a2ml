@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+#
+# ECOSYSTEM.a2ml — Ecosystem position
+#
+# This is the ECOSYSTEM file for evil-weevil itself.
+
+[metadata]
+project = "evil-weevil"
+ecosystem = "hyperpolymath"
+
+[position]
+type = "library"
+purpose = "A universally injectable enemy-intelligence kernel for computer games: a host-agnostic, deterministic AI core behind an Idris2-verified C ABI over a Zig zero-overhead FFI seam, so enemy behaviour is authored once and injected into whatever engine the game already uses."
+# IS-NOT — anti-identity (the boundary-erosion guard; each line is a real past
+# confusion or a predictable one, stated so the boundary is citable)
+what-this-is-not = [
+  "a game engine — it renders nothing, simulates no physics, and owns no scene graph",
+  "a cheat framework or a client-side anti-cheat bypass — the kernel must be safe to run server-authoritative",
+  "a behaviour-tree or utility-AI library in the usual sense — it ships an ABI and a workbench, not an engine binding",
+  "a general-purpose planner for non-game domains",
+]
+
+[pipeline]
+position = "foundation"
+chain = "standards → rsr-template-repo → evil-weevil → (host games, engines, adapters)"
+notes = "Injected into a host three ways (ADR-0004): in-process library, sidecar process, or bytecode blob. The host declares its capabilities at init — navmesh, line-of-sight queries, physics raycasts, waypoint graph, spawn rights — and the kernel degrades gracefully rather than aborting."
+coordination = "standards"
+
+[related-projects]
+projects = [
+  { name = "rsr-template-repo", relationship = "parent", notes = "The RSR spine this repo was minted from; parent-pin recorded in .machine_readable/descriptiles/VARIANT.a2ml." },
+  { name = "standards", relationship = "standard-source", notes = "Defines the RSR standard, contractile canon and policies that this repo conforms to." },
+  { name = "gv-clade-index", relationship = "registry", notes = "Clade registry that this repo's identity is derived for and registered in (registration is the owner's act)." },
+]

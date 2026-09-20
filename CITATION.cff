@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "Jewell"
+    given-names: "Jonathan D.A."
+title: "Evil Weevil"
+version: 0.1.0
+date-released: "2026-09-20"
+url: "https://github.com/metadatastician/evil-weevil"
+repository-code: "https://github.com/metadatastician/evil-weevil"
+license: MPL-2.0
+keywords:
+  - "rsr"
+  - "formal-verification"
+  - "neurosymbolic"
+  - "provenance"

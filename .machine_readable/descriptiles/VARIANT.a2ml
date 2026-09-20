@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: MPL-2.0
+#
+# VARIANT.a2ml — provenance contract (ADR-0002 shape; ADR-0003 use).
+# Records what this repo was minted from so the drift gate
+# (scripts/check-variant-drift.sh <parent-checkout>) and future
+# re-templating tooling have a defined input.
+#
+# NOTE: placeholder rendering means many files differ from the
+# parent by design; folding rendered answers into [normalise] is
+# future work (ADR-0003), so the gate is informational for minted
+# repos until then.
+
+[metadata]
+project = "evil-weevil"
+schema_version = "0.1.0"
+last-updated = "2026-09-20"
+
+[variant]
+parent = "hyperpolymath/rsr-template-repo"
+parent-pin = "06d8c9f7a8d2043f05e90c7420bd3379e4de02e7"  # template tip at mint
+role = "minted-repo"
+stack = "unspecified"
+direction = "generated-from-core"
+
+[normalise]
+rules = "action-pins self-name"
+
+[paths.added]
+paths = []
+
+[paths.removed]
+paths = []
+
+[paths.diverged]
+# Files a minted repo owns from birth.
+paths = [
+  ".machine_readable/descriptiles/CLADE.a2ml",
+  ".machine_readable/descriptiles/VARIANT.a2ml",
+  ".machine_readable/rsr-profile.a2ml",
+]
