@@ -77,6 +77,19 @@ milestones = [
 #    proof-check-idris2` is the gate; `just abi-gate-self-test` proves the ABI gates
 #    fail when the ABI is deliberately broken.
 
+# 6. OPEN 2026-09-20 — the repository is published at hyperpolymath/evil-weevil (private),
+#    not metadatastician/evil-weevil as the brief specifies: creating or transferring into
+#    the org needs Administration:write on the org, which the credentials presented did not
+#    hold, and the org refuses classic tokens outright (org-wide policy). A transfer is a
+#    browser click for an org admin; ADR-0011 records the measurement. The 55 identity
+#    references in the tree are deliberately NOT rewritten to the staging location.
+# 7. OPEN 2026-09-20 — CI is RED AND NOT BROKEN: 23 of 27 runs on the private repo failed
+#    with zero steps executed ("recent account payments have failed or your spending limit
+#    needs to be increased"); every job reported steps: 0. The gates pass in a clean local
+#    tree (`just seam-check`, 5/5). Resolve by making the repository public (free standard
+#    runners, estate house style) or by fixing the account's payment state. Do not read the
+#    badge as a code failure. ADR-0011 decision 4.
+
 [critical-next-actions]
 actions = [
   "Phase 2 — steering: turn the INVESTIGATE direction into a path (this is where a remembered POSITION may finally earn its keep, and where Abi.Memory's bearing choice gets revisited)",
