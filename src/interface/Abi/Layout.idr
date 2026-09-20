@@ -106,11 +106,41 @@ sizesOf : List (String, CType) -> List Nat
 sizesOf [] = []
 sizesOf (f :: rest) = fieldSizeC f :: sizesOf rest
 
-||| Does the layout work out regardless of where the struct starts?
-||| (Stride equals size, which is what makes arrays of these safe.)
+||| `n` is a whole number of `unit`s. Written with structural recursion on `n` so
+||| it computes for closed Nats (the same reason `mod` cannot be used here).
 public export
-strideEqSize : List Nat -> Bool
-strideEqSize ss = totalOf ss == totalOf ss
+isMultipleOf : Nat -> Nat -> Bool
+isMultipleOf unit n =
+  case n of
+    Z => True
+    S k => if k + 1 == unit then True else if k + 1 < unit then False else isMultipleOf unit k
+
+||| The alignment unit every struct in this ABI is padded to. 8 is not a
+||| preference: it is the widest member (u64) and the reason the C compiler needs
+||| no implicit padding in any of the seven structs.
+public export
+structAlignUnit : Nat
+structAlignUnit = 8
+
+||| Does this padding arrangement work out regardless of where the struct starts —
+||| i.e. is the struct's size a whole number of its alignment units, so that an
+||| array of them has no gap and `stride == size`? That is the property that makes
+||| `ee_snapshot snapshots[N]` safe and the reason every struct here is padded to a
+||| multiple of 8.
+|||
+||| This used to read `totalOf ss == totalOf ss`, which is true of every list and
+||| therefore checks nothing. It is now a real predicate, and it is LOAD-BEARING
+||| rather than decorative: `Abi.Gen` refuses to emit a struct whose stride is not
+||| safe, so a padding mistake stops generation instead of shipping.
+|||
+||| Stated as a runtime predicate rather than a theorem for the reason recorded in
+||| the module header: `mod` reduces on literals but not on a stuck application, so
+||| `strideEqSize fields = True` is not a proposition Idris2 0.7.0 will discharge by
+||| computation over a computed size. The alignment theorems below remain the
+||| proof layer, stated over the literal sizes; this is the gate.
+public export
+strideEqSize : Nat -> List Nat -> Bool
+strideEqSize align ss = isMultipleOf align (totalOf ss)
 
 --------------------------------------------------------------------------------
 -- ee_version — 8 bytes

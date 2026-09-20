@@ -67,6 +67,9 @@ workflows:
         - 'actions/checkout@v7.0.1'
     '.github/workflows/rust-ci.yml': []
     '.github/workflows/scorecard.yml': []
+    '.github/workflows/seam.yml':
+        - 'actions/cache@v6.1.0'
+        - 'actions/checkout@v7.0.1'
     '.github/workflows/secret-scanner.yml': []
     '.github/workflows/security-policy.yml':
         - 'actions/checkout@v7.0.1'

@@ -98,10 +98,20 @@ kernel-host-test: kernel-build
         src/interface/ffi/zig-out/lib/libevil_weevil.a -o _build/null-host
     @./_build/null-host
 
+# Prove the gates FAIL when the ABI is broken. Three deliberate breakages in
+# scratch copies: a widened field (the generator must refuse), a hand-edited C
+# offset define (the C compiler must reject it), a hand-edited Zig offset (the
+# build must fail at comptime). A gate nobody has watched fail is not a gate —
+# this is the recipe that makes that sentence checkable rather than rhetorical.
+abi-gate-self-test:
+    @echo "==> breaking the ABI three ways to prove the gates notice"
+    @bash scripts/abi-gate-self-test.sh
+
 # ── The whole seam, in order ─────────────────────────────────────────────────
 
 # Phase 1 acceptance: model → proofs → generation → no drift → C header compiles
 # → kernel builds and asserts its own layout → both hosts agree on 10,000 ticks.
-seam-check: abi-check abi-header-check kernel-test kernel-host-test
+seam-check: abi-check abi-header-check kernel-test kernel-host-test abi-gate-self-test
     @echo ""
-    @echo "SEAM OK — the model, the header, the kernel and both null hosts agree."
+    @echo "SEAM OK — the model, the header, the kernel and both null hosts agree,"
+    @echo "          and every gate above has been watched to fail on a broken ABI."

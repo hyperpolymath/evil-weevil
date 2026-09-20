@@ -66,16 +66,19 @@ milestones = [
 #    over health, ammo, contacts, range), `ee_init` takes budget_units from a stub,
 #    and v0 consults no randomness at all. Each is deliberate and recorded in
 #    ADR-0006 and the kernel header, not overlooked.
-# 5. Four Idris2 modules remain quarantined in verification/proofs/idris2/MANIFEST
-#    (they are Idris1-era template files that need Data.Nat); the four modules that
-#    define the ABI are gated in src/interface/Abi/ and do compile.
+# 5. RESOLVED 2026-09-20 — nothing is quarantined: all ten Idris2 modules compile
+#    (the four modules that define the ABI, gated from src/interface/Abi/, and six
+#    under verification/proofs/idris2/, including the four template modules that had
+#    been quarantined since the template's own ground-truthing). `just
+#    proof-check-idris2` is the gate; `just abi-gate-self-test` proves the ABI gates
+#    fail when the ABI is deliberately broken.
 
 [critical-next-actions]
 actions = [
   "Phase 2 — perception and memory: give the agent a map of what it has seen, ageing stale contacts, and prove in Abi.Foreign that memory never outlives its tick budget",
   "Phase 2 — replace the five-branch rule with a utility/behaviour graph while keeping the pinned digest test: a changed policy MUST change that number, deliberately",
-  "Wire `just seam-check` into CI (.github/workflows) so the ABI cannot drift on a machine nobody was watching",
-  "File the upstream mint defects against rsr-template-repo",
+  "Phase 2 — age the memory properly: TTLs per contact class rather than one interval, and prove the forgetting bound in Abi.Memory",
+  "File the upstream mint defects against rsr-template-repo (three now; MINT-NOTES.adoc §5-6)",
   "Ratify ADR-0004 (injection modes), ADR-0005 (ABI versioning and capability negotiation), ADR-0006 (determinism policy) before Phase 2 opens",
 ]
 

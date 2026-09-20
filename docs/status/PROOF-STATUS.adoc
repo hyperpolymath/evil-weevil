@@ -10,17 +10,23 @@
 |===
 | Category | Total | Done | In Progress | Blocked | Remaining
 
-| ABI/FFI (ABI) | 5 | 0 | 0 | 0 | 5
+| ABI/FFI (ABI) | 5 | 5 | 0 | 0 | 0
 | Typing (TP) | 2 | 0 | 0 | 0 | 2
 | Invariant (INV) | 0 | 0 | 0 | 0 | 0
 | Security (SEC) | 0 | 0 | 0 | 0 | 0
 | Concurrency (CONC) | 0 | 0 | 0 | 0 | 0
 | Algorithm (ALG) | 0 | 0 | 0 | 0 | 0
 | Domain (DOM) | 0 | 0 | 0 | 0 | 0
-| *Total* | *7* | *0* | *0* | *0* | *7*
+| *Total* | *7* | *5* | *0* | *0* | *2*
 |===
 
-*Overall*: 0% proven
+*Overall*: 71% proven (all five ABI/FFI proofs compile under idris2 0.7.0; the two
+Typing proofs are not yet written)
+
+The five ABI proofs are `gated` in `verification/proofs/idris2/MANIFEST`, so they are
+re-checked by `just proof-check-idris2` on every run — and a gated module that stops
+compiling fails CI. Quarantine is empty: the four modules that used to sit there were
+repaired on 2026-09-20 (see the MANIFEST notes for what each one needed).
 
 == Proofs Done
 

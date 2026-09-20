@@ -120,21 +120,31 @@ layoutChecksum =
 -- Cross-checks — nothing is emitted until these pass
 --------------------------------------------------------------------------------
 
-||| Names a struct whose named field list and declared size list disagree.
+||| Everything that can make this generator refuse to write.
+|||
+||| A sum type rather than a tuple: the two failures are different kinds of
+||| mistake with different fixes, and a tuple would have forced the stride failure
+||| to be reported as though a field list were at fault.
 public export
-CountMismatch : Type
-CountMismatch = (String, List Nat, List Nat)
+data GenError
+  = ||| The named field list and the proven size list disagree for this struct.
+    SizeMismatch String (List Nat) (List Nat)
+  | ||| The struct's size is not a whole number of alignment units, so arrays of it
+    ||| would step past the end of each element.
+    UnsafeStride String Nat
 
-checkOne : (Struct, List Nat) -> Either CountMismatch (Struct, List Nat)
+checkOne : (Struct, List Nat) -> Either GenError (Struct, List Nat)
 checkOne (st, declared) =
   let computed = sizesOf (sFields st)
-  in if computed == declared
-        then Right (st, computed)
-        else Left (sTag st, computed, declared)
+  in if computed /= declared
+        then Left (SizeMismatch (sTag st) computed declared)
+        else if strideEqSize structAlignUnit computed
+               then Right (st, computed)
+               else Left (UnsafeStride (sTag st) (totalOf computed))
 
 ||| Every struct, checked, with its computed sizes.
 export
-checkedStructs : Either CountMismatch (List (Struct, List Nat))
+checkedStructs : Either GenError (List (Struct, List Nat))
 checkedStructs = traverse checkOne (zip allStructs provenSizeLists)
 
 --------------------------------------------------------------------------------
@@ -252,7 +262,7 @@ entryPoints =
 
 |||| Render the whole header.
 export
-renderHeader : Either CountMismatch String
+renderHeader : Either GenError String
 renderHeader =
   case checkedStructs of
     Left e => Left e
@@ -311,7 +321,7 @@ zigStruct (st, sizes) =
              (sFields st) (offsetsOf sizes)
 
 export
-renderZig : Either CountMismatch String
+renderZig : Either GenError String
 renderZig =
   case checkedStructs of
     Left e => Left e
@@ -322,13 +332,20 @@ renderZig =
 -- Driving it
 --------------------------------------------------------------------------------
 
-reportMismatch : CountMismatch -> IO ()
-reportMismatch (name, computed, declared) = do
+reportMismatch : GenError -> IO ()
+reportMismatch (SizeMismatch name computed declared) = do
   putStrLn ("ABI MODEL MISMATCH in " ++ name)
   putStrLn ("  field list computes to: " ++ show computed)
   putStrLn ("  declared (and proven):  " ++ show declared)
   putStrLn "  The proven literal list and the named field list must agree."
   die "  Fix Abi.Types (both lists), then re-run. Nothing was written."
+
+reportMismatch (UnsafeStride name size) = do
+  putStrLn ("UNSAFE STRIDE in " ++ name ++ " (" ++ show size ++ " bytes)")
+  putStrLn ("  Not a whole number of alignment units (" ++ show structAlignUnit ++ "),")
+  putStrLn "  so an array of these would step past the end of each element."
+  putStrLn "  Add or resize padding fields until the size is a multiple of 8."
+  die "  Fix Abi.Types (the padding), then re-run. Nothing was written."
 
 writeOrDie : String -> String -> IO ()
 writeOrDie path body =

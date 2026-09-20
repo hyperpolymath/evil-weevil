@@ -4,6 +4,10 @@
 # Ground-truthed 2026-09-20 with idris2 0.7.0 (the version the estate pins, and the
 # version these verdicts were measured against).
 #
+# There is no production code in this file that is quarantined: every Idris2 module
+# in the repository compiles, and the four that used to sit in quarantine were
+# repaired rather than tolerated.
+#
 # ─── The ABI seam: the modules that actually define the C ABI ─────────────────
 # These live in src/interface/ beside the code they describe, not in this
 # directory. They are gated here anyway, because a proof about the wire format
@@ -18,7 +22,7 @@ src/interface|Abi/Gen.idr|gated| the generator itself: cross-checks proven sizes
 # ─── Idris2 material carried from the RSR template ───────────────────────────
 verification/proofs/idris2|ABI/Foreign.idr|gated| the shipped template module that compiles — real content, not a stub
 verification/proofs/idris2|Types.idr|gated| PROMOTED 2026-09-20 from quarantine: the Idris1-era template file typechecks under 0.7.0, so it had been sitting in quarantine as an excuse, not a fact
-verification/proofs/idris2|ABI/Layout.idr|quarantine| Undefined name NonZero (needs Data.Nat); then a genuine unification failure (S ?x vs f .fieldAlignment)
-verification/proofs/idris2|ABI/Platform.idr|quarantine| Undefined name LTE (needs Data.Nat); then Undefined name lteRefl
-verification/proofs/idris2|ABI/Pointers.idr|quarantine| .nonNull declared at quantity 0 (erased) yet projected into a value position, plus a unification failure — design decision, not a typo
-verification/proofs/idris2|ABI/Compliance.idr|quarantine| depends on quarantined ABI.Layout / ABI.Platform
+verification/proofs/idris2|ABI/Layout.idr|gated| REPAIRED 2026-09-20: imported Data.Nat, and `FieldAligned` now takes the NonZero witness as an argument — `SIsNonZero` inhabits `NonZero (S k)`, which an abstract record field cannot be
+verification/proofs/idris2|ABI/Platform.idr|gated| REPAIRED 2026-09-20: imported Data.Nat, and `lteRefl`/`lteSuccRight` (absent from this base) replaced with explicit LTESucc terms
+verification/proofs/idris2|ABI/Pointers.idr|gated| REPAIRED 2026-09-20: the So witness is no longer erased, so `safePtrNeverNull` can return it; `handlePtrEq` replaced by `handleNeverNull`, because structural equality of records carrying proofs is not the property the kernel needs
+verification/proofs/idris2|ABI/Compliance.idr|gated| REPAIRED 2026-09-20: imports Data.Nat itself — its types unfold into LTE, and an import is not transitive. The misleading "Data.Nat.LTE not a data type" was that missing import, not a malformed type

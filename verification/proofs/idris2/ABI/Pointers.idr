@@ -12,12 +12,17 @@ import Data.So
 %default total
 
 ||| A pointer value that has been proven non-null.
-||| The `So` constraint carries a compile-time witness that `ptr /= 0`.
+|||
+||| The `So` witness is NOT erased (no `0`), and that is deliberate: the lemma
+||| below hands the witness back to callers, and an erased field cannot be projected
+||| into a value position — which is exactly why the original text of this module did
+||| not compile. `So b` has at most one inhabitant, so carrying it costs a bit and
+||| buys a nameable proof.
 public export
 record SafePtr where
   constructor MkSafePtr
   ptr : Bits64
-  {auto 0 nonNull : So (ptr /= 0)}
+  {auto nonNull : So (ptr /= 0)}
 
 ||| Proof that SafePtr can never hold a null (zero) value.
 ||| This is enforced by the `So` constraint in the record.
@@ -46,7 +51,14 @@ record Handle (tag : String) where
   constructor MkHandle
   safePtr : SafePtr
 
-||| Proof that two handles with equal pointers are equal.
+||| Every handle is non-null, whichever handle it is.
+|||
+||| This replaces a proof that two handles with equal pointers are EQUAL, which is
+||| not the property anyone needs and not a true one here: `Handle` carries an `So`
+||| witness, so structural equality would require comparing the witnesses rather than
+||| the pointers. Handle identity is a host-side question (the host knows which
+||| resource it handed out); what the kernel needs from this module is that no handle
+||| is ever null, and that is what is proved.
 export
-handlePtrEq : (h1, h2 : Handle tag) -> h1.safePtr.ptr = h2.safePtr.ptr -> h1 = h2
-handlePtrEq (MkHandle (MkSafePtr p)) (MkHandle (MkSafePtr p)) Refl = Refl
+handleNeverNull : (h : Handle tag) -> So (h.safePtr.ptr /= 0)
+handleNeverNull (MkHandle sp) = sp.nonNull

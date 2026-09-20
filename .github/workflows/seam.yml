@@ -1,0 +1,108 @@
+# This workflow is managed by gh actions-lock.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+#
+# seam.yml — the ABI seam gate.
+#
+# Everything else in this repository's CI can be re-run by hand and argued about
+# later. This one cannot: it is the only thing standing between the frozen ABI and
+# a machine nobody is watching. ADR-0008 calls the drift gate load-bearing, and a
+# load-bearing thing that only runs when somebody remembers is not load-bearing.
+#
+# What it checks, and why each part is here:
+#
+#   1. The two tools the seam needs, at pinned versions. Not "latest": the whole
+#      claim is that the ABI does not move, and a toolchain that moves underneath
+#      it is how a frozen artefact stops being reproducible. The installer is the
+#      same script a contributor runs (scripts/install-toolchain.sh), so CI and a
+#      laptop cannot disagree about what "the toolchain" means.
+#   2. `just proof-check-idris2` — the model and the layout proofs typecheck, and
+#      every quarantined module still fails (a quarantined module that starts
+#      passing is a failure here, by design).
+#   3. `just seam-check` — regenerate and diff (no drift), compile the header as C,
+#      run both test suites, link the C host, and check that both hosts agree on
+#      the pinned 10,000-tick digest.
+#
+# The Idris2 bootstrap is slow (it builds the compiler from source, because Idris2
+# publishes no Linux binaries), hence the cache. The cache key names the versions,
+# so a version bump invalidates it rather than silently reusing the wrong compiler.
+name: ABI Seam
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  seam:
+    name: ABI seam (Idris2 model -> C header -> Zig kernel -> null hosts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      # Idris2 0.7.0 is bootstrapped from source (no Linux binaries exist upstream)
+      # and its libraries live under ~/.idris2, so both paths are cached. This is
+      # the difference between a 13-minute job and a 30-second one.
+      - name: Cache toolchain
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cache/evil-weevil/toolchain
+            ~/.idris2
+          key: ee-toolchain-zig0.16.0-idris2-0.7.0-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install the pinned toolchain
+        run: |
+          bash scripts/install-toolchain.sh
+          echo "$HOME/.cache/evil-weevil/toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: Toolchain versions (a failure above must not read as a version drift below)
+        run: |
+          zig version
+          idris2 --version
+
+      - name: Proof gate — the model and the layout proofs
+        run: just proof-check-idris2
+
+      - name: Seam gate — no drift, header compiles, both null hosts agree
+        run: just seam-check
+
+      - name: Relay the verdict
+        if: always()
+        run: |
+          {
+            echo "## ABI seam"
+            echo
+            echo "\`just seam-check\` is the Phase 1 acceptance gate (ADR-0008). If it"
+            echo "failed, the ABI moved: regenerate with \`just abi-gen\` and commit the"
+            echo "result, or explain in an ADR why it should."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  housegates:
+    name: Root shape, placeholders and the RSR validators (no toolchain needed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Root shape
+        run: bash scripts/check-root-shape.sh
+
+      - name: No unfilled placeholders
+        run: bash scripts/check-no-placeholders.sh
+
+      - name: RSR validators
+        run: just validate

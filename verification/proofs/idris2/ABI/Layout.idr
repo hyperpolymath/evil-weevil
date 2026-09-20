@@ -7,6 +7,9 @@
 
 module ABI.Layout
 
+import Data.Nat
+import Data.Nat.Order
+
 %default total
 
 ||| Witness that a type has a known size in bytes at compile time.
@@ -44,9 +47,16 @@ record StructField where
   fieldAlignment : Nat
 
 ||| Proof that a field is correctly aligned within a struct.
+|||
+||| The witness is an ARGUMENT rather than a literal: `SIsNonZero` inhabits
+||| `NonZero (S k)`, and `fieldAlignment f` is an abstract field of a record, so the
+||| constraint `fieldAlignment f = S k` is not solvable at the definition. Asking the
+||| type to carry the witness costs a caller nothing (the alignment is concrete at
+||| every real use) and is the difference between this proof existing and this module
+||| being quarantined.
 public export
-FieldAligned : StructField -> Type
-FieldAligned f = modNatNZ (fieldOffset f) (fieldAlignment f) SIsNonZero = 0
+FieldAligned : (f : StructField) -> {auto 0 ok : NonZero (fieldAlignment f)} -> Type
+FieldAligned f @{ok} = modNatNZ (fieldOffset f) (fieldAlignment f) ok = 0
 
 ||| Proof that a field does not overflow past a given struct size.
 public export

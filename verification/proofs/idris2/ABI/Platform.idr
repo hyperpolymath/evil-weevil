@@ -7,6 +7,9 @@
 
 module ABI.Platform
 
+import Data.Nat
+import Data.Nat.Order
+
 %default total
 
 ||| Supported target platforms for ABI verification.
@@ -51,13 +54,29 @@ export
 cIntAlways4 : (p : Platform) -> cIntSize p = 4
 cIntAlways4 _ = Refl
 
+||| 4 <= 8: `LTESucc` applied four times to `LTEZero : LTE 0 4`.
+|||
+||| Written out because this base library (0.7.0) has neither `lteRefl` nor
+||| `lteSuccRight`, which the template's original text assumed — an Idris1-era or
+||| different-base habit that left this module quarantined. The constructors are
+||| enough: `LTESucc` adds one to both sides, so four of them take `LTE 0 4` to
+||| `LTE 4 8`.
+export
+fourLeEight : LTE 4 8
+fourLeEight = LTESucc (LTESucc (LTESucc (LTESucc LTEZero)))
+
+||| 4 <= 4, the reflexive case, built the same way.
+export
+fourLeFour : LTE 4 4
+fourLeFour = LTESucc (LTESucc (LTESucc (LTESucc LTEZero)))
+
 ||| Proof that pointer size is always at least 4 bytes.
 export
 ptrSizeAtLeast4 : (p : Platform) -> LTE 4 (ptrSize p)
-ptrSizeAtLeast4 WASM32 = lteRefl
-ptrSizeAtLeast4 Linux64 = lteSuccRight (lteSuccRight (lteSuccRight (lteSuccRight lteRefl)))
-ptrSizeAtLeast4 LinuxARM64 = lteSuccRight (lteSuccRight (lteSuccRight (lteSuccRight lteRefl)))
-ptrSizeAtLeast4 MacOS64 = lteSuccRight (lteSuccRight (lteSuccRight (lteSuccRight lteRefl)))
-ptrSizeAtLeast4 MacOSARM64 = lteSuccRight (lteSuccRight (lteSuccRight (lteSuccRight lteRefl)))
-ptrSizeAtLeast4 Windows64 = lteSuccRight (lteSuccRight (lteSuccRight (lteSuccRight lteRefl)))
-ptrSizeAtLeast4 FreeBSD64 = lteSuccRight (lteSuccRight (lteSuccRight (lteSuccRight lteRefl)))
+ptrSizeAtLeast4 WASM32 = fourLeFour
+ptrSizeAtLeast4 Linux64 = fourLeEight
+ptrSizeAtLeast4 LinuxARM64 = fourLeEight
+ptrSizeAtLeast4 MacOS64 = fourLeEight
+ptrSizeAtLeast4 MacOSARM64 = fourLeEight
+ptrSizeAtLeast4 Windows64 = fourLeEight
+ptrSizeAtLeast4 FreeBSD64 = fourLeEight
