@@ -49,6 +49,7 @@ pub const INTENT_FLAG_DEGRADED: u32 = 1;
 pub const INTENT_FLAG_NEW_TARGET: u32 = 2;
 pub const INTENT_FLAG_UNREACHABLE: u32 = 4;
 pub const INTENT_FLAG_FROM_MEMORY: u32 = 8;
+pub const AGENT_FLAG_MEMORY_VALID: u32 = 1;
 pub const memory_ttl: u32 = 36;
 
 pub const sizeof_ee_version: usize = 8;

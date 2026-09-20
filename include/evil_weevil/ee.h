@@ -81,6 +81,9 @@ typedef uint32_t ee_status;
 #define EE_INTENT_FLAG_UNREACHABLE 4u
 #define EE_INTENT_FLAG_FROM_MEMORY 8u
 
+/* Bits in ee_agent.flags. */
+#define EE_AGENT_FLAG_MEMORY_VALID 1u
+
 /* Ticks a sighting stays actionable before the agent forgets it (Phase 2). */
 #define EE_MEMORY_TTL 36u
 

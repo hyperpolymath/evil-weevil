@@ -22,13 +22,14 @@ status = "active"
 name = "Evil Weevil"
 purpose = "A universally injectable enemy-intelligence kernel for computer games: a host-agnostic, deterministic AI core behind an Idris2-verified C ABI over a Zig zero-overhead FFI seam, so enemy behaviour is authored once and injected into whatever engine the game already uses."
 # Phase 1 (the seam) is complete and mechanically enforced: the ABI header is
-# generated from a proved model, both null hosts agree on a pinned 10,000-tick
-# digest, and `just seam-check` fails if any of that stops being true. Phase 2
-# has started with its specification half: Abi.Memory fixes what an agent
-# remembers and proves the freshness/forgetting properties, but NO kernel
-# behaviour reads it yet — the pinned digest is unchanged on purpose. This
-# number counts working behaviour, not scaffolding and not specifications.
-completion-percentage = 10
+# generated from a proved model, both null hosts agree on three pinned digests,
+# and `just seam-check` fails if any of that stops being true. Phase 2 has landed
+# its first half: perception and memory are specified, proved, implemented and
+# pinned — an agent that loses a contact investigates where it went, for at most
+# memory_ttl ticks, then forgets. Still to come inside Phase 2: the
+# utility/behaviour graph, steering. This number counts working behaviour, not
+# scaffolding and not specifications.
+completion-percentage = 15
 
 [position]
 phase = "implementation"   # design | implementation | testing | maintenance | archived
@@ -38,7 +39,7 @@ maturity = "experimental"  # experimental | alpha | beta | production | lts
 milestones = [
   { name = "Phase 0: identity — minted from rsr-template-repo, drift repaired, clade chosen, gates green", completion = 100 },
   { name = "Phase 1: the seam — ee.h v0, Idris2 layout/purity proofs, Zig FFI, null host, 10k-tick harness", completion = 100 },
-  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 10 },  # spec landed (Abi.Memory, gated); wiring blocked on the storage decision
+  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 35 },  # memory done end to end (ADR-0009); utility graph and steering remain
   { name = "Phase 3: authoring — enemy definition schema (a2ml), compiler, workbench and replay inspector", completion = 0 },
   { name = "Phase 4: adapters — Godot 4, Unity, Unreal, WASM, each passing one conformance kit", completion = 0 },
   { name = "Phase 5: populations — squads and roles, spawn director, threat curve, crowd LOD", completion = 0 },
@@ -77,8 +78,8 @@ milestones = [
 
 [critical-next-actions]
 actions = [
-  "Phase 2 — DECIDE where memory lives in the ABI before wiring it: grow ee_agent (layout change, new ADR, ABI 1.1, fingerprint moves) or add a separate memory struct plus a second entry point (additive). The memory itself is already specified and proved in Abi.Memory; only its home is unresolved",
-  "Phase 2 — wire the memory into the Zig kernel once it has a home, and give it its OWN pinned scenario: the current 10,000-tick digest never leaves the agent without a visible contact, so a memory branch cannot move it",
+  "Phase 2 — replace the five-branch rule with a utility/behaviour graph, keeping the three pinned digests: a changed policy MUST change them deliberately, in both hosts, with the reason written down",
+  "Phase 2 — steering: turn the INVESTIGATE direction into a path (this is where a remembered POSITION may finally earn its keep, and where Abi.Memory's bearing choice gets revisited)",
   "Phase 2 — replace the five-branch rule with a utility/behaviour graph while keeping the pinned digest test: a changed policy MUST change that number, deliberately",
   "Phase 2 — age the memory properly, later: TTLs per contact class rather than the one 36-tick interval Abi.Memory currently pins",
   "File the upstream mint defects against rsr-template-repo (three now; MINT-NOTES.adoc §5-6)",

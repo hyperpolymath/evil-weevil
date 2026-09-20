@@ -8,14 +8,17 @@
 ||| same as for `Abi.Foreign`: the kernel implements what is written here, and a
 ||| 10,000-tick digest pinned in CI makes a divergence loud.
 |||
-||| == STATUS: specification only
+||| == STATUS: specified, proved, and implemented
 |||
-||| Nothing in the Zig kernel reads this module yet, and the pinned digest is
-||| therefore UNCHANGED by this slice. That is deliberate — the rule and its
-||| proofs land first, the wiring lands with the storage decision recorded in
-||| "Open question" below — but it means `decideWithMemory` is, today, a
-||| specification with nobody calling it. Do not read the green build as evidence
-||| that the kernel has memory.
+||| `src/core/kernel.zig` implements this rule (ADR-0009). Wiring it MOVED the v0
+||| 10,000-tick digest, because that fixture has zero-contact ticks
+||| (`contact_count = tick % 5`) and the new branch fires inside it — the first
+||| draft of ADR-0009 predicted otherwise, and the gate corrected it within a
+||| minute. The old number survives as a STRONGER assertion than the pin it used to
+||| be: clear `EE_AGENT_FLAG_MEMORY_VALID` after every tick and the kernel
+||| reproduces v0 exactly, which both hosts now check. Memory itself is pinned by a
+||| third number, from a scenario built to reach forgetting ("the one that got
+||| away": 30 ticks seen, 70 unseen, per 100).
 |||
 ||| == What is remembered
 |||
@@ -54,16 +57,27 @@
 ||| constants reduce normally, which is why the theorems here can be `Refl` and
 ||| `Abi.Foreign`'s header comment saying otherwise has been corrected.
 |||
-||| == Open question (blocks the wiring, recorded here so it is not lost)
+||| == Where this lives in the wire format (decided 2026-09-20, ADR-0009)
 |||
-||| The frozen 1.0 `ee_agent` struct is 48 bytes of state the HOST owns and passes
-||| in. Memory is per-agent state, so it must live somewhere the host can hold it;
-||| there is no spare field. The three candidate answers — grow `ee_agent` (a
-||| layout change: new ADR, fingerprint moves, ABI 1.1), add a separate memory
-||| struct and a second entry point (additive, old hosts keep working), or hide it
-||| inside the kernel (rejected on sight: hidden state in a deterministic kernel
-||| is exactly the property this architecture exists to avoid) — are a decision
-||| for the owner, not for this module.
+||| v0's `ee_agent` was built with room for this: `memory_x`, `memory_y` (both Fx)
+||| and `memory_age` (U32) sat in it unused, and `flags` had no defined bits. Phase
+||| 2 therefore needs NO layout change — the ABI stays 1.0 and the layout checksum
+||| does not move — because defining a previously-undefined bit and using
+||| previously-ignored fields is additive. The mapping is:
+|||
+|||   memValid      <-> ee_agent.flags bit 0 (EE_AGENT_FLAG_MEMORY_VALID)
+|||   memId         <-> ee_agent.cached_target
+|||   memBearingCos <-> ee_agent.memory_x
+|||   memBearingSin <-> ee_agent.memory_y
+|||   memAge        <-> ee_agent.memory_age
+|||
+||| `memId` rides on `cached_target` because that field already holds "the id this
+||| agent is pursuing", written from the last decision — and on the last tick a
+||| contact was visible, that IS the remembered contact. Growing the struct was the
+||| alternative, and was rejected: a breaking layout change for state the format
+||| already had room for. Hiding memory inside the kernel was rejected outright:
+||| hidden state in a deterministic kernel is the property this architecture exists
+||| to avoid.
 
 module Abi.Memory
 

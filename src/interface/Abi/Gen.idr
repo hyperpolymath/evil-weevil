@@ -96,6 +96,19 @@ allIntentFlags =
   , ("FROM_MEMORY", intentFlagFromMemory)
   ]
 
+||| Bits in `ee_agent.flags` — the agent's own state, as opposed to the intent it
+||| just produced. Emitted for the same reason the intent flags are: a bit a host
+||| cannot name is a bit a host cannot check.
+agentFlagDefine : (String, Nat) -> String
+agentFlagDefine (n, v) = "#define EE_AGENT_FLAG_" ++ n ++ " " ++ show v ++ "u"
+
+agentFlagZigConst : (String, Nat) -> String
+agentFlagZigConst (n, v) = "pub const AGENT_FLAG_" ++ n ++ ": u32 = " ++ show v ++ ";"
+
+public export
+allAgentFlags : List (String, Nat)
+allAgentFlags = [ ("MEMORY_VALID", agentFlagMemoryValid) ]
+
 --------------------------------------------------------------------------------
 -- Checksumming the layout
 --------------------------------------------------------------------------------
@@ -297,6 +310,8 @@ renderHeader =
              ++ unlines (map actionDefine allActions)
              ++ "\n/* Bits in ee_intent.flags. */\n"
              ++ unlines (map intentFlagDefine allIntentFlags)
+             ++ "\n/* Bits in ee_agent.flags. */\n"
+             ++ unlines (map agentFlagDefine allAgentFlags)
              ++ "\n"
              ++ "/* Ticks a sighting stays actionable before the agent forgets it (Phase 2). */\n"
              ++ "#define EE_MEMORY_TTL " ++ show memoryTtl ++ "u\n\n"
@@ -339,6 +354,7 @@ zigPreamble =
       ++ map (\c => "pub const ACTION_" ++ actionName c ++ ": u32 = " ++ show (actionCode c) ++ ";") allActions
       ++ [ "" ]
       ++ map intentFlagZigConst allIntentFlags
+      ++ map agentFlagZigConst allAgentFlags
       ++ [ "pub const memory_ttl: u32 = " ++ show memoryTtl ++ ";" ]
       ++ [ "" ] )
 

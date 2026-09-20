@@ -75,7 +75,14 @@ static ee_snapshot make_snapshot(uint64_t t)
 }
 
 /* Fold a run into one number, so two runs compare with one integer. */
-static uint64_t run_trace(uint64_t seed, ee_context *ctx_out)
+/* Drive 10,000 ticks of the v0 fixture and fold every intent into one number.
+ *
+ * memory_enabled = 0 clears the agent's MEMORY_VALID bit after every tick, which
+ * is all "v0 behaviour" means now: the kernel's memory branch is gated on that bit
+ * and nothing else, so a host that never lets it be set gets the amnesiac rule
+ * exactly. ADR-0009 claims that; the assertion in main() checks it against the
+ * digest v0 shipped, rather than leaving it as prose. */
+static uint64_t run_trace(uint64_t seed, ee_context *ctx_out, int memory_enabled)
 {
     ee_init_desc desc;
     memset(&desc, 0, sizeof desc);
@@ -117,6 +124,8 @@ static uint64_t run_trace(uint64_t seed, ee_context *ctx_out)
             failures++;
             break;
         }
+        if (!memory_enabled)
+            agent.flags &= ~((uint32_t)EE_AGENT_FLAG_MEMORY_VALID);
         digest = digest * 1099511628211ULL + intent.action;
         digest = digest * 1099511628211ULL + intent.target_id;
         digest = digest * 1099511628211ULL + (uint64_t)(int64_t)intent.move_x;
@@ -124,6 +133,80 @@ static uint64_t run_trace(uint64_t seed, ee_context *ctx_out)
         answered++;
     }
     check(answered == 10000u, "the kernel answered all 10,000 ticks");
+    if (ctx_out) *ctx_out = ctx;
+    return digest;
+}
+
+/* ── The scenario the v0 fixture cannot reach: losing the contact ────────────
+ *
+ * The v0 fixture has zero-contact ticks (tick %% 5 == 0) and the memory branch
+ * fires on them, but a fresh sighting arrives within five ticks, so the agent
+ * never gets near the TTL. This fixture is the other half: a contact is visible
+ * for the first 30 ticks of every 100 and gone for the 70 after that, so the
+ * agent investigates for exactly memory_ttl ticks and then forgets — a hundred
+ * times over the run. Duplicated in src/interface/ffi/test/null_host.zig on
+ * purpose: two hosts, two languages, one trace, checked by digest. */
+static ee_snapshot make_chase_snapshot(uint64_t t)
+{
+    const int visible = (t % 100u) < 30u;
+    ee_snapshot s = make_snapshot(t);
+    s.health = (ee_fx)(4 * EE_FX_ONE);
+    s.ammo = (ee_fx)(3 * EE_FX_ONE);
+    s.contact_count = visible ? 1u : 0u;
+    if (visible) {
+        s.contact0.id = 7;
+        s.contact0.bearing_cos = 16384;
+        s.contact0.bearing_sin = 8192;
+        s.contact0.distance = 196608; /* 3.0 — beyond attack range */
+        s.contact0.threat = (ee_fx)(EE_FX_ONE / 2);
+    }
+    return s;
+}
+
+static uint64_t run_chase_trace(uint64_t seed, ee_context *ctx_out,
+                                unsigned counts[9], unsigned *from_memory)
+{
+    ee_init_desc desc;
+    memset(&desc, 0, sizeof desc);
+    desc.struct_size = (uint32_t)sizeof desc;
+    desc.abi_major = EE_ABI_MAJOR;
+    desc.capabilities = EE_CAP_NAVMESH | EE_CAP_LINE_OF_SIGHT;
+    desc.max_agents = 1;
+    desc.rng_seed = seed;
+    desc.abi_fingerprint = EE_ABI_FINGERPRINT;
+
+    ee_context ctx;
+    memset(&ctx, 0, sizeof ctx);
+    if (ee_init(&desc, &ctx) != EE_STATUS_OK) {
+        failures++;
+        return 0;
+    }
+
+    ee_agent agent;
+    memset(&agent, 0, sizeof agent);
+    agent.rng_state = seed;
+
+    memset(counts, 0, 9u * sizeof counts[0]);
+    *from_memory = 0;
+
+    uint64_t digest = 0;
+    for (uint64_t t = 0; t < 10000u; ++t) {
+        ee_snapshot snap = make_chase_snapshot(t);
+        ee_intent intent;
+        memset(&intent, 0, sizeof intent);
+        if (ee_tick(&ctx, &snap, &agent, &intent) != EE_STATUS_OK) {
+            failures++;
+            break;
+        }
+        if (intent.action < 9u)
+            counts[intent.action]++;
+        if (intent.flags & EE_INTENT_FLAG_FROM_MEMORY)
+            (*from_memory)++;
+        digest = digest * 1099511628211ULL + intent.action;
+        digest = digest * 1099511628211ULL + intent.target_id;
+        digest = digest * 1099511628211ULL + (uint64_t)(int64_t)intent.move_x;
+        digest = digest * 1099511628211ULL + intent.flags;
+    }
     if (ctx_out) *ctx_out = ctx;
     return digest;
 }
@@ -165,19 +248,88 @@ int main(void)
         check(ee_init(NULL, &ctx) == EE_STATUS_BAD_PARAM, "a null descriptor is refused");
     }
 
-    /* Determinism: two seeded runs, one digest. */
-    ee_context ctx_a, ctx_b;
-    const uint64_t first = run_trace(0xEE0000000000001ULL, &ctx_a);
-    const uint64_t second = run_trace(0xEE0000000000001ULL, &ctx_b);
-    printf("  digest after 10,000 ticks: %llu\n", (unsigned long long)first);
+    /* Determinism: two seeded runs, one digest. Plus the third run that makes
+     * ADR-0009's compatibility claim a checked fact rather than a promise. */
+    ee_context ctx_a, ctx_b, ctx_v0;
+    const uint64_t first = run_trace(0xEE0000000000001ULL, &ctx_a, 1);
+    const uint64_t second = run_trace(0xEE0000000000001ULL, &ctx_b, 1);
+    const uint64_t v0 = run_trace(0xEE0000000000001ULL, &ctx_v0, 0);
+    printf("  digest after 10,000 ticks (memory enabled): %llu\n", (unsigned long long)first);
+    printf("  the same trace with the memory flag cleared: %llu\n", (unsigned long long)v0);
     check(first == second, "two runs of 10,000 ticks agree exactly");
     /* Pinned, not merely self-consistent: this number is asserted by BOTH hosts
      * (this one and src/interface/ffi/test/null_host.zig), so the C and Zig views
      * of the same fixture must agree bit for bit. Changing the rule changes this
      * number — that is the point. When you change it on purpose, change it in both
-     * places and say why in ADR-0006. */
-    check(first == 4061121875253101873ULL, "the trace digest matches the pinned value");
+     * places and say why in ADR-0006.
+     *
+     * It MOVED when Phase 2 wired memory in (from 4061121875253101873), and the
+     * reason is not a mystery: this fixture has zero-contact ticks, so the new
+     * branch fires inside it. The old number did not disappear — it moved one
+     * check down, where it now asserts something stronger than it did before. */
+    check(first == 14165495496352896129ULL, "the trace digest matches the pinned value");
+    check(v0 == 4061121875253101873ULL,
+          "a host that clears the memory flag gets EXACTLY v0's trace (ADR-0009)");
+    check(first != v0, "memory is consulted in the default configuration — the check above is not vacuous");
     check(ctx_a.ticks_run == 10000u, "the context counted every tick");
+
+    /* The scenario the v0 fixture cannot reach: a contact that leaves. */
+    {
+        ee_context ctx_m;
+        unsigned counts[9];
+        unsigned from_memory = 0;
+        const uint64_t chase = run_chase_trace(0xEE0000000000001ULL, &ctx_m, counts, &from_memory);
+        printf("  chase digest: %llu (investigate=%u advance=%u from_memory=%u)\n",
+               (unsigned long long)chase, counts[EE_ACTION_INVESTIGATE],
+               counts[EE_ACTION_ADVANCE], from_memory);
+        check(chase == 12283675074724005768ULL, "the chase digest matches the pinned value");
+        /* 36 is memory_ttl: this assertion is Abi.Memory's
+         * freshJustBeforeTtl/staleAtTtl boundary, counted in a real run. */
+        check(counts[EE_ACTION_INVESTIGATE] == 3600u, "the agent investigates for exactly 36 ticks per 100");
+        check(counts[EE_ACTION_ADVANCE] == 6400u, "and advances for the other 64");
+        check(counts[EE_ACTION_ATTACK] == 0u && counts[EE_ACTION_FLEE] == 0u &&
+                  counts[EE_ACTION_RELOAD] == 0u,
+              "no other action fires in the chase fixture");
+        check(from_memory == counts[EE_ACTION_INVESTIGATE],
+              "the FROM_MEMORY flag is set on investigate and nowhere else");
+        check(ctx_m.ticks_run == 10000u, "the chase context counted every tick");
+    }
+
+    /* The TTL boundary, watched at the agent rather than only in the model: 65
+     * ticks in, the memory is one tick short of the TTL; the 66th reaches it and
+     * forgets, clearing the payload rather than only lowering the flag. */
+    {
+        ee_context ctx;
+        memset(&ctx, 0, sizeof ctx);
+        ee_init_desc desc;
+        memset(&desc, 0, sizeof desc);
+        desc.struct_size = (uint32_t)sizeof desc;
+        desc.abi_major = EE_ABI_MAJOR;
+        desc.capabilities = EE_CAP_NAVMESH;
+        desc.max_agents = 1;
+        desc.abi_fingerprint = EE_ABI_FINGERPRINT;
+        check(ee_init(&desc, &ctx) == EE_STATUS_OK, "memory probe context initialises");
+
+        ee_agent agent;
+        memset(&agent, 0, sizeof agent);
+        ee_intent intent;
+        for (uint64_t t = 0; t < 65u; ++t) {
+            ee_snapshot snap = make_chase_snapshot(t);
+            (void)ee_tick(&ctx, &snap, &agent, &intent);
+        }
+        check((agent.flags & (uint32_t)EE_AGENT_FLAG_MEMORY_VALID) != 0u,
+              "the memory is still valid one tick short of the TTL");
+        check(agent.memory_age == 35u, "the memory has aged to 35 (memory_ttl - 1)");
+
+        {
+            ee_snapshot snap = make_chase_snapshot(65);
+            (void)ee_tick(&ctx, &snap, &agent, &intent);
+        }
+        check((agent.flags & (uint32_t)EE_AGENT_FLAG_MEMORY_VALID) == 0u,
+              "the TTL is reached and the memory is forgotten");
+        check(agent.memory_x == 0 && agent.memory_y == 0 && agent.memory_age == 0u,
+              "forgetting cleared the payload, not just the flag");
+    }
 
     /* A minimal sanity check on the output stream: the fixture must actually make
      * the agent do more than one thing, or "deterministic" would be vacuous. */
@@ -206,9 +358,10 @@ int main(void)
         check(seen[EE_ACTION_RELOAD] > 0, "the agent reloads when out of ammo");
         check(seen[EE_ACTION_ADVANCE] > 0, "the agent advances with nothing to fight");
         check(seen[EE_ACTION_ATTACK] > 0, "the agent attacks when in range");
-        printf("  actions in 200 ticks: reload=%u advance=%u attack=%u flee=%u hold=%u\n",
+        check(seen[EE_ACTION_INVESTIGATE] > 0, "the agent investigates where a contact went");
+        printf("  actions in 200 ticks: reload=%u advance=%u attack=%u flee=%u hold=%u investigate=%u\n",
                seen[EE_ACTION_RELOAD], seen[EE_ACTION_ADVANCE], seen[EE_ACTION_ATTACK],
-               seen[EE_ACTION_FLEE], seen[EE_ACTION_HOLD]);
+               seen[EE_ACTION_FLEE], seen[EE_ACTION_HOLD], seen[EE_ACTION_INVESTIGATE]);
     }
 
     if (failures) {

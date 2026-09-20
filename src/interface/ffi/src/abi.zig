@@ -54,10 +54,18 @@ pub const ABI_MINOR = layout.abi_minor;
 pub const ABI_FINGERPRINT = layout.abi_fingerprint;
 pub const FX_ONE: i32 = layout.fx_one;
 
-// Intent flag bits (Abi.Types: intentFlagDegraded/NewTarget/Unreachable).
-pub const INTENT_FLAG_DEGRADED: u32 = 1;
-pub const INTENT_FLAG_NEW_TARGET: u32 = 2;
-pub const INTENT_FLAG_UNREACHABLE: u32 = 4;
+// Intent and agent flag bits, RE-EXPORTED from the generated file. They used to be
+// hand-copied here (Abi.Types: intentFlagDegraded/NewTarget/Unreachable), which made
+// this "nothing here is hand-numbered" file hand-number the two values a host is
+// most likely to branch on. Abi.Gen emits them now, from the same model as the
+// header, so a host reading ee.h and the kernel that produced the bits cannot
+// disagree — and adding a flag can no longer update one side and not the other.
+pub const INTENT_FLAG_DEGRADED = layout.INTENT_FLAG_DEGRADED;
+pub const INTENT_FLAG_NEW_TARGET = layout.INTENT_FLAG_NEW_TARGET;
+pub const INTENT_FLAG_UNREACHABLE = layout.INTENT_FLAG_UNREACHABLE;
+pub const INTENT_FLAG_FROM_MEMORY = layout.INTENT_FLAG_FROM_MEMORY;
+pub const AGENT_FLAG_MEMORY_VALID = layout.AGENT_FLAG_MEMORY_VALID;
+pub const memory_ttl = layout.memory_ttl;
 
 // ── The ABI structs ─────────────────────────────────────────────────────────
 // `extern struct` gives C layout. Field order and types mirror Abi.Types exactly.

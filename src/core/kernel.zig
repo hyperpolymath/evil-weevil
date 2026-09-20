@@ -12,10 +12,10 @@
 // allocation, no clock, no I/O — the properties ADR-0006 requires are also the
 // properties that make a replay bit-exact.
 //
-// The kernel is deliberately naive in its POLICY (a five-branch rule over health,
-// ammo, contacts and range) and strict in its DISCIPLINE (deterministic,
-// budgeted, capability-aware). Phase 2 grows the policy; nothing here should grow
-// a dependency.
+// The kernel is deliberately naive in its POLICY and strict in its DISCIPLINE
+// (deterministic, budgeted, capability-aware). Phase 2 has added exactly one
+// branch: perception memory (ADR-0009), specified and proved in
+// `src/interface/Abi/Memory.idr`. Nothing here has grown a dependency.
 
 const abi = @import("abi");
 
@@ -200,6 +200,61 @@ pub fn decide(snap: *const abi.EeSnapshot) Decision {
 
 // ── The tick ────────────────────────────────────────────────────────────────
 
+// ── Perception memory (Phase 2, ADR-0009) ───────────────────────────────────
+// Where the memory lives, why no layout moved, and what each slot means: see
+// Abi.Memory's header and ADR-0009. In one line: the memory is a DIRECTION and an
+// age, and it is stored in the fields `ee_agent` has carried unused since v0.
+
+/// Is there a direction worth walking along?
+///
+/// The comparison is against `abi.memory_ttl`, the constant Abi.Gen emits from the
+/// model — the same 36 that `Abi.Memory`'s theorems pin (`freshJustBeforeTtl`,
+/// `staleAtTtl`). The kernel does not get to have its own idea of the TTL.
+fn memoryFresh(agent: *const abi.EeAgent) bool {
+    return (agent.flags & abi.AGENT_FLAG_MEMORY_VALID) != 0 and
+        agent.memory_age < abi.memory_ttl;
+}
+
+/// Forgetting clears the payload rather than only lowering the flag: a forgotten
+/// memory that still held a direction is one bug away from steering an agent at a
+/// contact that is two minutes stale. `Abi.Memory.forgottenHoldsNothing` says the
+/// same thing about the model, and this is the code it is talking about.
+fn forget(agent: *abi.EeAgent) void {
+    agent.flags &= ~abi.AGENT_FLAG_MEMORY_VALID;
+    agent.memory_x = 0;
+    agent.memory_y = 0;
+    agent.memory_age = 0;
+}
+
+/// A tick in which nothing was seen: the age advances, and at the TTL the memory
+/// is forgotten — `age + 1 < ttl` keeps it, equality or past it forgets. The
+/// boundary is the TTL itself, so "still actionable one tick short of it, gone at
+/// it" holds in the kernel exactly as `Abi.Memory` proves it of the model.
+fn ageMemory(agent: *abi.EeAgent) void {
+    if ((agent.flags & abi.AGENT_FLAG_MEMORY_VALID) == 0) return;
+    if (agent.memory_age +% 1 < abi.memory_ttl) {
+        agent.memory_age +%= 1;
+        return;
+    }
+    forget(agent);
+}
+
+/// Walk towards where the contact was. The remembered id is REPORTED, never
+/// dereferenced: the kernel holds no pointers into host memory and cannot follow a
+/// stale id anywhere.
+fn investigate(agent: *const abi.EeAgent) Decision {
+    return .{
+        .action = abi.ACTION_INVESTIGATE,
+        .target = agent.cached_target,
+        .priority = 32768, // 0.50 — between advance (0.40) and attack (0.80)
+        .speed = abi.FX_ONE,
+        .move_x = agent.memory_x,
+        .move_y = agent.memory_y,
+        .look_x = agent.memory_x,
+        .look_y = agent.memory_y,
+    };
+}
+
 /// Work the decision costs, in budget units. Crude on purpose at v0: five fixed
 /// units plus one per contact examined, mirroring `tickModel` in Abi.Foreign.
 pub fn workUnits(snap: *const abi.EeSnapshot) u32 {
@@ -229,11 +284,38 @@ pub fn tick(
     // that already has this property.
     _ = rngNext(&agent.rng_state);
 
-    const d = decide(snap);
+    const near = nearestContact(snap);
+    var d = decide(snap);
+    var from_memory = false;
+
+    // The memory a tick DECIDES with is the one it carried in; the time it spends
+    // is accounted for on the way out. That ordering is what makes this code and
+    // `Abi.Memory.decideWithMemory` one rule rather than two similar ones:
+    // freshness is read before the age moves.
+    //
+    // Branch order is the policy, and it does not change here: a sighting is
+    // handled by the five-branch rule above (sight outranks memory), and memory is
+    // consulted only when there is nothing to see.
+    if (near) |n| {
+        // The most recent look is the best one: the direction is overwritten and
+        // the age resets. The id needs no field of its own — `cached_target` is
+        // about to be written with it from the same decision.
+        agent.memory_x = @as(i32, n.bearing_cos);
+        agent.memory_y = @as(i32, n.bearing_sin);
+        agent.memory_age = 0;
+        agent.flags |= abi.AGENT_FLAG_MEMORY_VALID;
+    } else {
+        if (memoryFresh(agent)) {
+            d = investigate(agent);
+            from_memory = true;
+        }
+        ageMemory(agent);
+    }
 
     var flags: u32 = 0;
     if (degraded) flags |= abi.INTENT_FLAG_DEGRADED;
     if (agent.cached_target != d.target) flags |= abi.INTENT_FLAG_NEW_TARGET;
+    if (from_memory) flags |= abi.INTENT_FLAG_FROM_MEMORY;
 
     agent.tick_last = snap.tick;
     agent.cached_action = d.action;

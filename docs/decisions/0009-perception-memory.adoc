@@ -1,0 +1,112 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Architecture Decision Record: 0009-perception-memory
+
+== 9. What an agent remembers, where it lives, and how it is checked
+
+Date: 2026-09-20
+
+=== Status
+
+Accepted (implemented in the same change; this ADR records what shipped).
+
+=== Context
+
+v0's rule is amnesiac. It reads the current snapshot and nothing else: a contact
+that steps behind a pillar stops existing, and the agent walks on as though it had
+never seen anybody. That is good enough for a skeleton and wrong for an enemy, and
+"perception and memory" is the first half of Phase 2 in DEVELOPMENT-PLAN.adoc.
+
+Three things had to be settled before any code could exist:
+
+* **What is remembered.** A position, or a direction? A stored world position goes
+  stale as the agent moves — chasing a remembered point means walking to where
+  somebody was and finding nothing, and correcting for the agent's own motion needs
+  fixed-point vector arithmetic this phase does not have.
+* **Where it lives.** The kernel is deterministic and holds no hidden state; state
+  belongs to the host, in the structs the host passes in. The frozen 1.0 `ee_agent`
+  has no obvious spare field — or so it looked, until the model was read carefully.
+* **How it is checked.** ADR-0006 is explicit: a policy change MUST change a pinned
+  digest deliberately. But the pinned 10,000-tick scenario always has contacts
+  visible, so a memory branch cannot fire in it. A behaviour that no assertion can
+  reach is a behaviour nobody has tested.
+
+=== Decision
+
+1. **Memory is a direction and an age.** `memBearingCos`/`memBearingSin` hold the last
+   known direction to the contact (Q16.16, as the wire format publishes it), plus the
+   contact's id, an age in ticks, and a validity flag. The model, and the theorems
+   about freshness and forgetting, are `src/interface/Abi/Memory.idr`. Recording a
+   bearing rather than a position is a decision about THIS phase: steering, later,
+   may need positions, and that change goes through this ADR's successor.
+
+2. **It lives in the fields v0 already reserved.** `ee_agent` has carried
+   `memory_x`, `memory_y` (both `Fx`) and `memory_age` (U32) since the freeze, and
+   its `flags` field had no defined bits. The mapping is:
+
+       memValid      <-> ee_agent.flags bit 0  (EE_AGENT_FLAG_MEMORY_VALID)
+       memId         <-> ee_agent.cached_target
+       memBearingCos <-> ee_agent.memory_x
+       memBearingSin <-> ee_agent.memory_y
+       memAge        <-> ee_agent.memory_age
+
+   **The ABI stays 1.0 and the layout checksum does not move.** Defining a bit that
+   was previously undefined, and using fields that were previously ignored, is
+   additive: a host that zeroes the struct and never reads those fields behaves
+   exactly as it did before. The alternative — growing the struct to add an
+   explicit validity byte or id field — was rejected: it is a breaking layout
+   change to re-express something the format already had.
+
+   `memId` rides on `cached_target` because that field already holds "the id this
+   agent is pursuing", written from the last decision. On the last tick a contact
+   was visible, that IS the remembered contact, so no separate field is needed and
+   none was added.
+
+3. **The TTL is one interval, 36 ticks** (`memoryTtl`), six tenths of a second at
+   60 Hz: long enough to walk around the pillar, short enough that nobody arrives
+   ten seconds late. Per-contact-class TTLs are a later refinement, not a v1 need.
+
+4. **The rule grows exactly one branch, and keeps its order.** Ammo, then sight,
+   then memory; inside sight, flee, attack, advance — as in `Abi.Foreign`, whose
+   branch order is itself pinned by theorems. With nothing visible and a fresh
+   memory the agent INVESTIGATES the remembered direction; with nothing visible and
+   nothing remembered it advances, exactly as v0 did. The intent carries
+   `EE_INTENT_FLAG_FROM_MEMORY` when the action came from memory, so a host can
+   tell "walking towards an enemy" from "walking towards where an enemy was" —
+   which is the whole point of having memory at all.
+
+5. **Two pinned digests, not one changed one.** The 10,000-tick v0 trace keeps
+   4061121875253101873 and MUST keep it: it is the evidence that adding memory did
+   not alter v0's behaviour. Memory gets a second scenario — "the one that got
+   away" — in which the only contact vanishes for seventy ticks out of every
+   hundred, asserted by BOTH null hosts with its own pinned digest. Changing
+   memory's behaviour changes that number, deliberately, in both hosts at once.
+
+6. **No hidden state.** The kernel still allocates nothing and keeps nothing between
+   calls: memory is written into the agent struct the host owns and passes in, so a
+   host can inspect it, save it, replay it, or refuse to let it change.
+
+=== Consequences
+
+* A host that never sets `EE_AGENT_FLAG_MEMORY_VALID` gets v0's behaviour exactly;
+  the flag is the only switch.
+* Memory is bounded: an agent investigates for at most `memoryTtl` ticks after
+  losing sight, then forgets and resumes v0's advance. Nothing can chase a ghost
+  indefinitely, and that bound is a theorem (`Abi.Memory`), not a hope.
+* Because memory is host-visible, an adapter CAN corrupt it; a garbage id cannot
+  cause anything worse than walking in a strange direction, because the kernel
+  never dereferences the id — it only reports it.
+* The self-test that proves the ABI gates notice a broken ABI (`just abi-gate-self-test`)
+  is unaffected: it breaks sizes and offsets, and none moved.
+
+=== Alternatives considered
+
+* **Grow `ee_agent`.** Rejected: a breaking layout change for state the format
+  already had room for, and it would have invalidated the frozen header to no
+  benefit.
+* **A second struct and a new entry point.** Rejected for the same reason: more
+  surface, two state objects to keep in step, and the version handshake would have
+  to say which one was in use.
+* **Memory inside the kernel, keyed by agent index.** Rejected outright. Hidden
+  state in a deterministic kernel is the one property this architecture exists to
+  avoid; it would make a replay depend on call history rather than on the inputs.

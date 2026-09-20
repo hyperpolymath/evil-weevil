@@ -163,7 +163,13 @@ test "a lying contact_count cannot read past the snapshot" {
 
 /// Drive `ticks` ticks at `seed` and fold every intent into one number, so two
 /// runs can be compared with a single assertion.
-fn runTrace(seed: u64, ticks: usize) u64 {
+///
+/// `memory_enabled = false` clears the agent's MEMORY_VALID bit after every tick,
+/// which is the whole of what "v0 behaviour" means now: the kernel's memory branch
+/// is gated on that bit and nothing else, so a host that never lets it be set gets
+/// the amnesiac rule exactly. That claim is asserted below, against the digest v0
+/// shipped, rather than being left as prose in an ADR.
+fn runTraceMode(seed: u64, ticks: usize, memory_enabled: bool) u64 {
     var ctx = context(seed, 0xFFFF_FFFF, 64);
     var ag = agent(seed);
     var digest: u64 = 0;
@@ -176,12 +182,67 @@ fn runTrace(seed: u64, ticks: usize) u64 {
         const snap = snapshot(t, 7, health, ammo, contacts);
         var intent = kernel.tick(&ctx, &snap, &ag);
         kernel.degradeForCapabilities(&ctx, &intent);
+        if (!memory_enabled) ag.flags &= ~abi.AGENT_FLAG_MEMORY_VALID;
         digest = digest *% 1099511628211 +% intent.action;
         digest = digest *% 1099511628211 +% intent.target_id;
         digest = digest *% 1099511628211 +% @as(u64, @bitCast(@as(i64, intent.move_x)));
         digest = digest *% 1099511628211 +% intent.flags;
     }
     return digest;
+}
+
+fn runTrace(seed: u64, ticks: usize) u64 {
+    return runTraceMode(seed, ticks, true);
+}
+
+// ── The scenario the v0 fixture cannot reach: losing the contact ────────────
+//
+// The 10,000-tick fixture never leaves the agent without a visible contact for
+// long enough to exercise forgetting — it has zero-contact ticks (tick % 5 == 0)
+// and the memory branch fires on them, but a fresh sighting arrives within five
+// ticks, so the agent never gets near the TTL. This fixture is the other half:
+// a contact is visible for the first 30 ticks of every 100, and gone for the 70
+// after that, so the agent investigates for exactly `memory_ttl` ticks and then
+// forgets — repeatedly, 100 times over the run.
+//
+// Duplicated in tests/host/null_host.c on purpose: two hosts, two languages, one
+// trace, checked by digest.
+
+fn chaseSnapshot(tick: u64, visible: bool) abi.EeSnapshot {
+    var s = snapshot(tick, 7, FX * 4, FX * 3, if (visible) 1 else 0);
+    if (visible) {
+        s.contact0.id = 7;
+        s.contact0.bearing_cos = 16384;
+        s.contact0.bearing_sin = 8192;
+        s.contact0.distance = 196608; // 3.0 — beyond attack range
+        s.contact0.threat = FX / 2;
+    }
+    return s;
+}
+
+const ChaseTrace = struct {
+    digest: u64,
+    actions: [9]u32,
+    from_memory: u32,
+};
+
+fn runChaseTrace(seed: u64, ticks: usize) ChaseTrace {
+    var ctx = context(seed, 0xFFFF_FFFF, 64);
+    var ag = agent(seed);
+    var out = ChaseTrace{ .digest = 0, .actions = [_]u32{0} ** 9, .from_memory = 0 };
+    var t: u64 = 0;
+    while (t < ticks) : (t += 1) {
+        const snap = chaseSnapshot(t, (t % 100) < 30);
+        var intent = kernel.tick(&ctx, &snap, &ag);
+        kernel.degradeForCapabilities(&ctx, &intent);
+        if (intent.action < 9) out.actions[intent.action] += 1;
+        if (intent.flags & abi.INTENT_FLAG_FROM_MEMORY != 0) out.from_memory += 1;
+        out.digest = out.digest *% 1099511628211 +% intent.action;
+        out.digest = out.digest *% 1099511628211 +% intent.target_id;
+        out.digest = out.digest *% 1099511628211 +% @as(u64, @bitCast(@as(i64, intent.move_x)));
+        out.digest = out.digest *% 1099511628211 +% intent.flags;
+    }
+    return out;
 }
 
 test "10,000 ticks are bit-identical across two runs" {
@@ -195,8 +256,65 @@ test "the 10,000-tick digest matches the pinned value, and the C host agrees" {
     // Two independent hosts, two languages, one trace: this is the differential tie
     // between the kernel and its host-independent specification in Abi.Foreign, and
     // the thing a host adapter is allowed to rely on.
+    //
+    // This number MOVED when Phase 2 wired memory in (from 4061121875253101873), and
+    // that is the deliberate change ADR-0006 demands rather than a surprise: the
+    // fixture has zero-contact ticks, so the new branch fires inside it. The old
+    // number did not disappear — it moved one test down, where it now asserts
+    // something stronger than it did before.
     const digest = runTrace(0xEE_0000_0000_0001, 10_000);
-    try std.testing.expectEqual(@as(u64, 4061121875253101873), digest);
+    try std.testing.expectEqual(@as(u64, 14165495496352896129), digest);
+}
+
+test "with the memory flag cleared, the trace is EXACTLY v0's — the compatibility claim, checked" {
+    // ADR-0009 says a host that never sets EE_AGENT_FLAG_MEMORY_VALID gets v0's
+    // behaviour, unchanged. That is a claim about a third-party host, so it is the
+    // one claim in the ADR that this repository cannot take on trust: here it is,
+    // against the digest v0 actually shipped.
+    const v0 = runTraceMode(0xEE_0000_0000_0001, 10_000, false);
+    try std.testing.expectEqual(@as(u64, 4061121875253101873), v0);
+
+    // ...and the two are not the same number, so the assertion above is not vacuous:
+    // memory IS consulted in the default configuration.
+    try std.testing.expect(runTrace(0xEE_0000_0000_0001, 10_000) != v0);
+}
+
+test "the one that got away: investigate for exactly the TTL, then forget" {
+    const r = runChaseTrace(0xEE_0000_0000_0001, 10_000);
+    try std.testing.expectEqual(@as(u64, 12283675074724005768), r.digest);
+    // 30 sighted ticks then 36 investigations then 34 advances, a hundred times:
+    // the 36 is `memory_ttl`, so this assertion is also the model's
+    // `freshJustBeforeTtl`/`staleAtTtl` boundary, counted in a real run.
+    try std.testing.expectEqual(@as(u32, 3600), r.actions[abi.ACTION_INVESTIGATE]);
+    try std.testing.expectEqual(@as(u32, 6400), r.actions[abi.ACTION_ADVANCE]);
+    try std.testing.expectEqual(@as(u32, 0), r.actions[abi.ACTION_RELOAD]);
+    try std.testing.expectEqual(@as(u32, 0), r.actions[abi.ACTION_ATTACK]);
+    try std.testing.expectEqual(@as(u32, 0), r.actions[abi.ACTION_FLEE]);
+    // Every investigate says so in the intent, and ONLY investigate does: a host
+    // can trust the flag without cross-checking the action.
+    try std.testing.expectEqual(r.actions[abi.ACTION_INVESTIGATE], r.from_memory);
+}
+
+test "memory: the TTL boundary, watched at the agent rather than only in the model" {
+    var ctx = context(1, 0xFFFF_FFFF, 64);
+    var ag = agent(1);
+
+    var t: u64 = 0;
+    while (t < 65) : (t += 1) _ = kernel.tick(&ctx, &chaseSnapshot(t, (t % 100) < 30), &ag);
+    // 65 ticks in: last sighting at 29, so the memory is at age 35 — one tick short
+    // of the TTL, which is the freshest a memory can be and still be "about to go".
+    try std.testing.expect(ag.flags & abi.AGENT_FLAG_MEMORY_VALID != 0);
+    try std.testing.expectEqual(@as(u32, 35), ag.memory_age);
+
+    _ = kernel.tick(&ctx, &chaseSnapshot(65, false), &ag);
+    // 66 ticks in: the TTL is reached, and forgetting CLEARS the payload — flag,
+    // direction and age — rather than marking the memory old. A host reading the
+    // struct sees nothing worth walking along, which is the property
+    // `Abi.Memory.forgottenHoldsNothing` states about the model.
+    try std.testing.expectEqual(@as(u32, 0), ag.flags & abi.AGENT_FLAG_MEMORY_VALID);
+    try std.testing.expectEqual(@as(i32, 0), ag.memory_x);
+    try std.testing.expectEqual(@as(i32, 0), ag.memory_y);
+    try std.testing.expectEqual(@as(u32, 0), ag.memory_age);
 }
 
 test "v0's rule does not consult the RNG, and the digest says so" {

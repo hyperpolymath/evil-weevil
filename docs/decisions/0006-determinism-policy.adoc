@@ -42,13 +42,27 @@ floating-point is pleasant, and the workbench wants to look smooth.
 Three facts about the shipped kernel that a reader of this ADR would otherwise have to
 infer from the code, recorded here because each will surprise somebody:
 
-1. **The 10,000-tick digest is pinned in two places.** `runTrace` folds every intent of a
-   fixed fixture into one 64-bit number; both the Zig null host
-   (`src/interface/ffi/test/null_host.zig`) and the C host (`tests/host/null_host.c`)
-   assert it equals 4061121875253101873. Two hosts in two languages, one number: that is
-   the differential tie between the kernel and the rule stated in `Abi.Foreign`. A policy
-   change changes this number, which is the point — change it deliberately, in both
-   places, and say why.
+1. **The digests are pinned in two places each, and there are three of them (Phase 2).**
+   `runTrace` folds every intent of a fixed fixture into one 64-bit number; both the Zig
+   null host (`src/interface/ffi/test/null_host.zig`) and the C host
+   (`tests/host/null_host.c`) assert the same numbers. Two hosts in two languages, one
+   number each: that is the differential tie between the kernel and the rules stated in
+   `Abi.Foreign` and `Abi.Memory`. A policy change changes a number, which is the point —
+   change it deliberately, in both places, and say why.
+
+   [cols="3,1,2", options="header"]
+   |===
+   | What it pins | Value | Fixture
+   | The v0 rule with memory consulted | 14165495496352896129 | 10,000 ticks, `contact_count = tick %% 5`
+   | v0 with `MEMORY_VALID` cleared — the compatibility anchor | 4061121875253101873 | same fixture, flag cleared every tick
+   | Perception memory end to end | 12283675074724005768 | "the one that got away": 30 ticks seen, 70 unseen, per 100
+   |===
+
+   The second row is why the first row's value moved in Phase 2 without anything being
+   lost: the pre-Phase-2 pin was not retired, it was relabelled into a STRONGER assertion
+   — a host that opts out of memory gets v0's trace exactly, checked on every run.
+   ADR-0009 has the story, including the wrong prediction that number corrected.
+
 2. **v0 does not consume randomness**, so the trace is seed-independent. The kernel still
    advances its SplitMix64 stream on every tick, so the stream is a function of tick
    count alone and never of a branch taken earlier. A test asserts the seed-independence

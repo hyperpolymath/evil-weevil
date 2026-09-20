@@ -420,6 +420,16 @@ public export
 intentFlagUnreachable : Nat
 intentFlagUnreachable = 4
 
+||| Bits in `ee_agent.flags`. The field existed in v0 with no defined bits, which
+||| is why Phase 2 needs no layout change: the memory slots (`memory_x`,
+||| `memory_y`, `memory_age`) were already reserved beside it. Using an undefined
+||| bit is additive — a host that zeroed the struct and ignored the field behaves
+||| exactly as before — so the layout checksum does not move and the ABI stays 1.0.
+||| See ADR-0009.
+public export
+agentFlagMemoryValid : Nat
+agentFlagMemoryValid = 1
+
 ||| Set when the intent is aimed at somewhere the agent REMEMBERS rather than at
 ||| something it can see right now (Phase 2). Without this bit a host cannot tell
 ||| "walking towards an enemy" from "walking towards where an enemy was", and the
@@ -427,6 +437,12 @@ intentFlagUnreachable = 4
 public export
 intentFlagFromMemory : Nat
 intentFlagFromMemory = 8
+
+||| The agent flag is bit 0, as a bit VALUE (1). Pinned like the intent flags, so
+||| a change fails to compile here rather than quietly redefining a wire bit.
+export
+agentFlagMemoryValidIsOne : Abi.Types.agentFlagMemoryValid = 1
+agentFlagMemoryValidIsOne = Refl
 
 ||| How long a sighting stays actionable, in ticks. Six tenths of a second at
 ||| 60 Hz: long enough to keep pursuing somebody who stepped behind a pillar, short
