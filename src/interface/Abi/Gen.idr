@@ -75,6 +75,27 @@ statusDefine s = "#define EE_STATUS_" ++ statusName s ++ " " ++ show (statusCode
 actionDefine : Action -> String
 actionDefine a = "#define EE_ACTION_" ++ actionName a ++ " " ++ show (actionCode a)
 
+||| Intent flags, emitted rather than hand-copied. The Zig side used to declare its
+||| own INTENT_FLAG_* constants with the same numbers typed in by hand, and the C
+||| header had none at all — so a host could not name the bits it was being handed,
+||| and the two languages could disagree without anything noticing. These are
+||| bit VALUES (1, 2, 4, 8), not bit indices: `<<` is written into the header for
+||| the reader's benefit and the value is what the kernel ors together.
+intentFlagDefine : (String, Nat) -> String
+intentFlagDefine (n, v) = "#define EE_INTENT_FLAG_" ++ n ++ " " ++ show v ++ "u"
+
+intentFlagZigConst : (String, Nat) -> String
+intentFlagZigConst (n, v) = "pub const INTENT_FLAG_" ++ n ++ ": u32 = " ++ show v ++ ";"
+
+public export
+allIntentFlags : List (String, Nat)
+allIntentFlags =
+  [ ("DEGRADED", intentFlagDegraded)
+  , ("NEW_TARGET", intentFlagNewTarget)
+  , ("UNREACHABLE", intentFlagUnreachable)
+  , ("FROM_MEMORY", intentFlagFromMemory)
+  ]
+
 --------------------------------------------------------------------------------
 -- Checksumming the layout
 --------------------------------------------------------------------------------
@@ -274,7 +295,11 @@ renderHeader =
              ++ "\n/* Every entry point returns one of these; the codes above are its values. */\n"
              ++ "typedef uint32_t ee_status;\n\n"
              ++ unlines (map actionDefine allActions)
+             ++ "\n/* Bits in ee_intent.flags. */\n"
+             ++ unlines (map intentFlagDefine allIntentFlags)
              ++ "\n"
+             ++ "/* Ticks a sighting stays actionable before the agent forgets it (Phase 2). */\n"
+             ++ "#define EE_MEMORY_TTL " ++ show memoryTtl ++ "u\n\n"
              ++ unlines (map structBlock sts)
              ++ unlines (concatMap staticAsserts sts)
              ++ "\n"
@@ -312,6 +337,9 @@ zigPreamble =
       ++ map (\c => "pub const STATUS_" ++ statusName c ++ ": u32 = " ++ show (statusCode c) ++ ";") allStatuses
       ++ [ "" ]
       ++ map (\c => "pub const ACTION_" ++ actionName c ++ ": u32 = " ++ show (actionCode c) ++ ";") allActions
+      ++ [ "" ]
+      ++ map intentFlagZigConst allIntentFlags
+      ++ [ "pub const memory_ttl: u32 = " ++ show memoryTtl ++ ";" ]
       ++ [ "" ] )
 
 zigStruct : (Struct, List Nat) -> List String

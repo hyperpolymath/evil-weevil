@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Idris2 0.7.0 — measured notes
+
+These are facts this repository MEASURED against the pinned toolchain (Idris2
+0.7.0, Chez Scheme, x86-64 Linux), recorded so the next person does not have to
+rediscover them — and, more importantly, so nobody repeats a claim this repo
+once believed. Each entry says what was run and what happened. Nothing here is
+inherited from documentation or from a blog post.
+
+== 1. The binder trap (the expensive one)
+
+A BARE lowercase name in a TYPE is implicitly bound as a fresh implicit
+argument, even when a global of that name is in scope, and Idris2 only *warns*
+about the shadowing. The theorem then silently becomes a claim about an unknown
+variable, so nothing reduces and every `Refl` fails.
+
+[source,idris]
+----
+-- fails: warnings about implicit binding, then
+-- "Mismatch between: 36 and localConst"
+localConst : Nat
+localConst = 36
+p : localConst = 36
+p = Refl
+
+-- passes
+q : Probe2.localConst = 36
+q = Refl
+----
+
+Consequences, all of which were misdiagnosed here at least once:
+
+* `map f xs`, a top-level constant, and `offsetsOf` over a named list ALL
+  reduce. They always did. `Abi.Layout`'s header used to claim otherwise; it is
+  corrected in place, and the `map`-becomes-opaque-`mapImpl` claim is retracted
+  there. What looked like an evaluator limit was this binder.
+* A same-module constant needs its own module as a qualifier (`Probe2.localConst`
+  from inside `Probe2`). Self-qualification works.
+* In a term position (not a type) the bare name is fine: it resolves to the
+  global. The trap is types only.
+* Style this repo has adopted from here on: name the constants, qualify them in
+  theorem types, and let the theorems pin the numbers. `Abi.Memory` is the
+  worked example. `Abi.Foreign`'s literals are kept because its theorems were
+  written against them, not because the names are unprovable.
+
+== 2. `idris2 --check` exit status is not the verdict
+
+Observed repeatedly: `idris2 --check ABI/Compliance.idr` printed
+`Error: Data.Nat.LTE not a data type` and still exited 0 (measured through
+`PIPESTATUS`). Conversely a module that is already up to date prints nothing at
+all, so "no output" is not evidence of success either.
+
+*Never trust the exit code or the silence.* Parse for `Error:`/`Warning:` and
+prefer a fresh build directory (`--build-dir`) when the point is to prove a file
+really compiles. `scripts/check-proofs.sh` is written to parse output for
+exactly this reason.
+
+== 3. Integer arithmetic: there is no `(-)` on `Nat`
+
+`memoryTtl - 1` in a type gives `Can't find an implementation for Neg Nat`:
+`(-)` is the `Neg` interface (Integer/Int/Double) and `Nat` has no instance.
+Use `pred` (`pred 36` reduces to `35`), or `minus` written out.
+
+Since literal `Nat` comparisons do reduce (`0 < 36` is `True` by `Refl`), an
+explicit bound a tick short of a TTL is provable; the subtraction is the only
+obstacle, not the comparison.
+
+== 4. This base has no `lteRefl` / `lteSuccRight`
+
+The RSR template's `ABI/Platform.idr` assumed them. Build the terms instead:
+
+[source,idris]
+----
+fourLeEight : LTE 4 8
+fourLeEight = LTESucc (LTESucc (LTESucc (LTESucc LTEZero)))
+----
+
+== 5. An erased proof field cannot be projected
+
+`SafePtr` carrying `{auto 0 nonNull : So (ptr /= 0)}` cannot give that witness
+back out of `safePtrNeverNull` — `(.nonNull) is not accessible in this context`.
+Drop the `0`. `So` has at most one inhabitant, so keeping the field is nearly
+free, and `ABI/Pointers.idr` needs it to state "no handle is ever null", which
+is the property the kernel actually relies on.
+
+== 6. `SIsNonZero` cannot inhabit an abstract field's `NonZero`
+
+`modNatNZ n m SIsNonZero` works when `m` is `S k` for a known `k`. It does not
+work for `fieldAlignment f` where `f` is an abstract record field, because no
+reduction can reveal the successor. Pass the witness in as an argument
+(`FieldAligned : (f : StructField) -> {auto 0 ok : NonZero (fieldAlignment f)} -> Type`)
+and bind it (`@{ok}`).
+
+== 7. Imports are not transitive, and the error lies about why
+
+`ABI/Compliance.idr` used types that unfold into `LTE` and imported only
+`ABI.Layout`/`ABI.Platform`. Idris2 reported `Error: Data.Nat.LTE not a data
+type` — which reads like a malformed type, not a missing import. Import
+`Data.Nat` in any module whose types mention `LTE`, whatever its imports do.
+
+== 8. Measured-not-measured
+
+* `String` equality in a proof position: NOT re-measured in the 2026-09-20 pass.
+  `Abi.Layout`'s header says so explicitly rather than repeating the old claim.
+* `<` on symbolic `Nat`s does not reduce (it recurses on its first argument).
+  Theorems over concrete instances are the convention; a general monotonicity
+  theorem needs order lemmas.
+* No `Integral Nat`, no `exit`/`mapM_` in base `System` (affects programs, not
+  proofs — `Abi.Gen` is a program and lives accordingly).

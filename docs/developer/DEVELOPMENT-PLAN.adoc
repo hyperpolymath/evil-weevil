@@ -129,6 +129,13 @@ We do not advance on vibes. Each phase has a gate that can fail.
 | Golden replays bit-exact on two platforms; budget guard demonstrably degrades
   instead of overrunning.
 
+  *Started 2026-09-20:* the memory SPECIFICATION landed and is gated —
+  `src/interface/Abi/Memory.idr` defines what is remembered (a bearing and an age,
+  not a position), proves freshness, the TTL boundary and forgetting, and extends the
+  v0 rule with one `INVESTIGATE` branch. The kernel does not read it yet and the
+  pinned digest is deliberately unchanged. The wiring waits on where memory LIVES in
+  the ABI: the frozen 48-byte `ee_agent` has no spare field.
+
 | *3. Authoring*
 | Enemy definition schema (a2ml), compiler, workbench, replay inspector.
 | A designer authors a new enemy archetype without touching code, and watches it

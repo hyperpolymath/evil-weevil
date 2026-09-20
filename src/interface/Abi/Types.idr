@@ -101,9 +101,10 @@ fxOne : Nat
 fxOne = 65536
 
 ||| The scaling factor (2^16 = 65536, the `fxOne` above) is comfortably inside
-||| i32 range, so Q16.16 is representable at all. Written with literals because
-||| Idris2 does not unfold a top-level constant in a proof position; the tie to
-||| `fxOne` is the definition above, which is textual rather than derived.
+||| i32 range, so Q16.16 is representable at all. The theorem is stated over the
+||| literal 65536 and the tie to `fxOne` is definitional — a qualified constant
+||| DOES reduce, whatever the earlier comment here said; see the correction in
+||| `Abi.Foreign`'s header and docs/developer/IDRIS2-NOTES.adoc.
 export
 fxOneFitsI32 : So (65536 < 2147483647)
 fxOneFitsI32 = Oh
@@ -418,6 +419,21 @@ intentFlagNewTarget = 2
 public export
 intentFlagUnreachable : Nat
 intentFlagUnreachable = 4
+
+||| Set when the intent is aimed at somewhere the agent REMEMBERS rather than at
+||| something it can see right now (Phase 2). Without this bit a host cannot tell
+||| "walking towards an enemy" from "walking towards where an enemy was", and the
+||| difference is the entire point of having memory.
+public export
+intentFlagFromMemory : Nat
+intentFlagFromMemory = 8
+
+||| How long a sighting stays actionable, in ticks. Six tenths of a second at
+||| 60 Hz: long enough to keep pursuing somebody who stepped behind a pillar, short
+||| enough that an agent does not walk to where a player stood ten seconds ago.
+public export
+memoryTtl : Nat
+memoryTtl = 36
 
 --------------------------------------------------------------------------------
 -- Total name maps and enumerations

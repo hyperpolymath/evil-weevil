@@ -39,3 +39,4 @@ depends = base
 modules = Abi.Types
         , Abi.Layout
         , Abi.Foreign
+        , Abi.Memory

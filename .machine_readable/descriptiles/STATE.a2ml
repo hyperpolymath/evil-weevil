@@ -24,9 +24,11 @@ purpose = "A universally injectable enemy-intelligence kernel for computer games
 # Phase 1 (the seam) is complete and mechanically enforced: the ABI header is
 # generated from a proved model, both null hosts agree on a pinned 10,000-tick
 # digest, and `just seam-check` fails if any of that stops being true. Phase 2
-# (behaviour) has not started. This number counts working behaviour, not
-# scaffolding inherited from the template.
-completion-percentage = 8
+# has started with its specification half: Abi.Memory fixes what an agent
+# remembers and proves the freshness/forgetting properties, but NO kernel
+# behaviour reads it yet — the pinned digest is unchanged on purpose. This
+# number counts working behaviour, not scaffolding and not specifications.
+completion-percentage = 10
 
 [position]
 phase = "implementation"   # design | implementation | testing | maintenance | archived
@@ -36,7 +38,7 @@ maturity = "experimental"  # experimental | alpha | beta | production | lts
 milestones = [
   { name = "Phase 0: identity — minted from rsr-template-repo, drift repaired, clade chosen, gates green", completion = 100 },
   { name = "Phase 1: the seam — ee.h v0, Idris2 layout/purity proofs, Zig FFI, null host, 10k-tick harness", completion = 100 },
-  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 0 },
+  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 10 },  # spec landed (Abi.Memory, gated); wiring blocked on the storage decision
   { name = "Phase 3: authoring — enemy definition schema (a2ml), compiler, workbench and replay inspector", completion = 0 },
   { name = "Phase 4: adapters — Godot 4, Unity, Unreal, WASM, each passing one conformance kit", completion = 0 },
   { name = "Phase 5: populations — squads and roles, spawn director, threat curve, crowd LOD", completion = 0 },
@@ -75,9 +77,10 @@ milestones = [
 
 [critical-next-actions]
 actions = [
-  "Phase 2 — perception and memory: give the agent a map of what it has seen, ageing stale contacts, and prove in Abi.Foreign that memory never outlives its tick budget",
+  "Phase 2 — DECIDE where memory lives in the ABI before wiring it: grow ee_agent (layout change, new ADR, ABI 1.1, fingerprint moves) or add a separate memory struct plus a second entry point (additive). The memory itself is already specified and proved in Abi.Memory; only its home is unresolved",
+  "Phase 2 — wire the memory into the Zig kernel once it has a home, and give it its OWN pinned scenario: the current 10,000-tick digest never leaves the agent without a visible contact, so a memory branch cannot move it",
   "Phase 2 — replace the five-branch rule with a utility/behaviour graph while keeping the pinned digest test: a changed policy MUST change that number, deliberately",
-  "Phase 2 — age the memory properly: TTLs per contact class rather than one interval, and prove the forgetting bound in Abi.Memory",
+  "Phase 2 — age the memory properly, later: TTLs per contact class rather than the one 36-tick interval Abi.Memory currently pins",
   "File the upstream mint defects against rsr-template-repo (three now; MINT-NOTES.adoc §5-6)",
   "Ratify ADR-0004 (injection modes), ADR-0005 (ABI versioning and capability negotiation), ADR-0006 (determinism policy) before Phase 2 opens",
 ]

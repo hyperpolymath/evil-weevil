@@ -75,6 +75,15 @@ typedef uint32_t ee_status;
 #define EE_ACTION_REGROUP 7
 #define EE_ACTION_INVESTIGATE 8
 
+/* Bits in ee_intent.flags. */
+#define EE_INTENT_FLAG_DEGRADED 1u
+#define EE_INTENT_FLAG_NEW_TARGET 2u
+#define EE_INTENT_FLAG_UNREACHABLE 4u
+#define EE_INTENT_FLAG_FROM_MEMORY 8u
+
+/* Ticks a sighting stays actionable before the agent forgets it (Phase 2). */
+#define EE_MEMORY_TTL 36u
+
 typedef struct {
   uint16_t major;
   uint16_t minor;

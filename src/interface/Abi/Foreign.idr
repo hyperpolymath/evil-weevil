@@ -106,11 +106,20 @@ clampExactlyBudget = Refl
 
 ||| Decide what this agent should do.
 |||
-||| Thresholds are written as literals rather than named constants on purpose:
-||| Idris2 does not unfold a top-level constant in a proof position, so a rule
-||| that referred to `lowHealth` could not have its behaviour proved at all. The
-||| names are in the comments; the numbers are in the code; the theorems below
-||| pin them.
+||| Thresholds are written as literals rather than named constants. The reason
+||| first recorded here — "Idris2 does not unfold a top-level constant in a proof
+||| position" — was MEASURED WRONG on 2026-09-20. Qualified, a constant reduces
+||| normally: `NonZero Abi.Types.memoryTtl` proves by `SIsNonZero`. The real trap
+||| is that a BARE lowercase name in a TYPE is implicitly bound as a fresh
+||| implicit argument, silently shadowing the global, so the theorem becomes a
+||| claim about an unknown variable that can never reduce — which is what the
+||| misdiagnosis was seeing, and why it looked like an evaluator limit.
+|||
+||| `Abi.Memory` is the pattern to copy: named constants, written with their full
+||| path in theorem types, proved by `Refl`. The literals here are kept because the
+||| theorems below were written against them, not because the names are
+||| unprovable. Names in the comments, numbers in the code, theorems pinning
+||| them — that part was always right. See docs/developer/IDRIS2-NOTES.adoc.
 |||
 |||   16384  = 0.25 in Q16.16   — "wounded"
 |||   65536  = 1.00             — attack range

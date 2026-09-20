@@ -45,6 +45,12 @@ pub const ACTION_TAKE_COVER: u32 = 6;
 pub const ACTION_REGROUP: u32 = 7;
 pub const ACTION_INVESTIGATE: u32 = 8;
 
+pub const INTENT_FLAG_DEGRADED: u32 = 1;
+pub const INTENT_FLAG_NEW_TARGET: u32 = 2;
+pub const INTENT_FLAG_UNREACHABLE: u32 = 4;
+pub const INTENT_FLAG_FROM_MEMORY: u32 = 8;
+pub const memory_ttl: u32 = 36;
+
 pub const sizeof_ee_version: usize = 8;
 pub const offset_ee_version_major: usize = 0;
 pub const offset_ee_version_minor: usize = 2;

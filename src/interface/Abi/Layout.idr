@@ -25,12 +25,26 @@
 |||
 ||| == Why the theorems spell out the size lists
 |||
-||| Idris2 does not reduce in a proof position:
+||| CORRECTED 2026-09-20. This section used to claim three things that Idris2 does
+||| not reduce in a proof position. Two of them are FALSE and were measured false
+||| with the pinned toolchain: `map (\x => x + 1) [1,2,3] = [2,3,4]` proves by
+||| `Refl`, and `offsetsOf` over a nullary NAMED list constant proves by `Refl`
+||| too. A top-level constant reduces normally when it is resolved as a name.
 |||
-|||   * `map f xs` (it becomes an opaque `mapImpl`),
-|||   * a top-level constant (so `offsetsOf versionSizes` stays stuck; `%inline`
-|||     does not change this — measured), or
-|||   * `String` equality.
+||| What the misdiagnosis was actually seeing is the binder trap recorded in
+||| `docs/developer/IDRIS2-NOTES.adoc`: a BARE lowercase name in a TYPE is
+||| implicitly bound as a fresh implicit argument, silently shadowing the global,
+||| so the goal becomes a claim about an unknown variable and nothing computes.
+||| Qualified, the same expressions reduce.
+|||
+||| The third claim (`String` equality) was not re-measured in that pass; do not
+||| rely on it either way.
+|||
+||| The theorems are still stated over literal size lists. That is now a
+||| historical choice rather than a forced one: restating them over the named
+||| lists in `Abi.Types` would make them STRONGER (change the model and the proofs
+||| break), and is a task for a future pass — not this one, because a frozen,
+||| verified module is the wrong place to relitigate proof style.
 |||
 ||| So each theorem is stated over a LITERAL size list rather than the named list
 ||| in `Abi.Types`. That duplication is the point of `sizesOf` below and of the
@@ -99,8 +113,10 @@ fieldSizeC : (String, CType) -> Nat
 fieldSizeC (_, t) = sizeOf t
 
 ||| The sizes implied by a NAMED field list. This is what `Abi.Gen` compares
-||| against the declared lists; it is a runtime function precisely because `map`
-||| does not reduce in a proof position (see the module header).
+||| against the declared lists. It is an explicit recursion rather than a `map`,
+||| and it is called at runtime by the generator; the module header records why the
+||| older "because `map` does not reduce in a proof position" justification was
+||| wrong.
 public export
 sizesOf : List (String, CType) -> List Nat
 sizesOf [] = []

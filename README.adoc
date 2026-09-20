@@ -35,9 +35,17 @@ generated `ee.h` at ABI 1.0 that a C host can compile against, a Zig kernel that
 asserts its own layout at comptime, and two null hosts — one Zig, one C — that agree
 on a pinned 10,000-tick digest. The behaviour itself is deliberately naive: the v0
 rule is five branches over health, ammo, contacts and range. No adapter and no
-support-matrix entry is claimed. `STATE.a2ml` carries the live number (currently 8%),
+support-matrix entry is claimed. `STATE.a2ml` carries the live number (currently 10%),
 `docs/developer/DEVELOPMENT-PLAN.adoc` carries the route, and `just seam-check` is
 the one command that reproduces the claim above.
+
+Phase 2 has started, with the specification half of it. `src/interface/Abi/Memory.idr`
+fixes what an agent remembers when it loses sight of a contact (a bearing and an age,
+not a position), proves the freshness and forgetting properties, and extends the v0
+rule with a single `INVESTIGATE` branch. The Zig kernel does NOT read it yet, so the
+pinned digest is deliberately unchanged — the wiring waits on one decision, recorded
+in that module: the frozen 48-byte `ee_agent` has no spare field, so memory needs
+either a versioned layout change or a second entry point.
 
 The whole seam in one command:
 
