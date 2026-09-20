@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Architecture Decision Record: 0008-generated-abi-artefacts
+
+== 8. The ABI artefacts are generated from the Idris2 model, committed, and checked for drift
+
+Date: 2026-09-20
+
+=== Status
+
+Accepted (implemented in Phase 1; this ADR records what shipped, not an intention).
+
+=== Context
+
+Phase 1 froze `ee.h` at ABI 1.0. Freezing raises the question the whole
+"universally injectable" claim rests on: what stops the header moving?
+
+A C header that is hand-written and a proof that lives in another language will
+diverge, and they diverge silently — a field is reordered in the header, the
+proofs still pass because they are about something else, a host links against the
+old layout, and the corruption shows up as a strange bug in somebody's game. The
+same applies in the other direction: a proof "updated" to match a header that was
+never regenerated proves nothing at all.
+
+There is also a practical constraint. A host game does not have Idris2 installed,
+and no engine programmer should need it to build against this ABI.
+
+Two mechanisms were needed, and neither alone is sufficient:
+
+* something that makes the header *derived* rather than authored;
+* something that makes the derivation *checked*, so "derived" does not become
+  "derived once, in 2026".
+
+=== Decision
+
+1. **The model is `src/interface/Abi/Types.idr`.** It carries the struct fields, the
+   fixed-point contract, the capability, status and action codes, and the declared
+   field-size lists. Nothing else declares these numbers.
+
+2. **`Abi.Gen` emits the artefacts** — `include/evil_weevil/ee.h` and
+   `src/interface/generated/ee_layout.zig` — from that single model. Both carry a
+   "GENERATED FILE — DO NOT EDIT BY HAND" banner naming the source and the recipe.
+
+3. **The artefacts are committed.** A host needs `ee.h` to build and must not need an
+   Idris2 toolchain to get it, and a standalone checkout must be buildable.
+
+4. **`just abi-check` regenerates into a scratch root and diffs.** This is the freeze.
+   It fails if a committed artefact differs from what the model produces, which
+   catches both a hand-edited header and a model changed without regeneration. It
+   runs inside `just seam-check`, which is the Phase 1 acceptance gate.
+
+5. **The generator cross-checks before it writes.** For each struct it compares the
+   fields in the model against the proven size list and refuses to write anything on a
+   mismatch, naming the struct that disagreed. A generator that emits a header nobody
+   checked is worse than no generator.
+
+6. **A layout checksum travels with the ABI**, alongside the version:
+   `EE_ABI_FINGERPRINT` = 18276775 at ABI 1.0, exported by `ee_abi_fingerprint()`.
+   A host may declare it in `ee_init_desc`; a mismatch is refused with
+   `EE_STATUS_FINGERPRINT_MISMATCH`, and a host that declares zero is accepted as
+   "not checking". Versioning catches deliberate change; the checksum catches the
+   accidental kind, including a rebuild with different assumptions where the version
+   numbers are unchanged.
+
+==== On the checksum's construction, and its limits
+
+The checksum is a position-weighted sum of every field size, mixed with the field
+and struct counts:
+
+  checksum = sum(i * size_i) * 1024 + field_count * 32 + struct_count   (1-based i)
+
+This is a **drift detector, not a cryptographic hash**: it detects accidental
+divergence with no false negatives, and does not resist a deliberate collision.
+Nothing in ADR-0005 requires otherwise — a hostile host that can rewrite the header
+can also rewrite the checksum.
+
+The conventional choice, FNV-1a over 64 bits, was written first and abandoned after
+measurement, and the reason is worth keeping because it will be proposed again:
+wrapping 64-bit multiply needs `Data.Bits`, and a modulus in `Nat` needs an
+`Integral Nat` instance that is not in scope in Idris2 0.7.0. A subtraction-based
+modulo *is* expressible and is O(value / modulus) — it hung for an hour on a 2^64
+modulus before being killed. Idris2 0.7.0 also does not reduce `map`, top-level
+constants, or `String` equality in type checking, which constrains how such a
+checksum can be stated at all (see `src/interface/Abi/Gen.idr`).
+
+Field **names** are deliberately excluded: renaming a field does not change the wire
+format, so it must not change the checksum.
+
+=== Consequences
+
+==== Positive
+
+* A host can build against a frozen ABI with a C compiler and nothing else.
+* The three layers of layout checking are independent and all mechanical: Idris2
+  proves the numbers, the C compiler's `_Static_assert`s check what the C compiler
+  lays out, and Zig's comptime asserts check what the kernel actually reads.
+* A drift is a failed build rather than a mystery: `just abi-check` for the artefacts,
+  `just abi-header-check` for the C side, `just seam-check` for all of it.
+* Renaming a field or adding a comment is possible without escalating to an ABI
+  version bump, because neither moves the checksum.
+
+==== Negative
+
+* Four artefacts must be regenerated together, and a contributor who edits the model
+  without running `just abi-gen` gets a failing gate rather than a silent success.
+* Committed generated files are, by construction, files that can go stale; the gate is
+  what makes that acceptable, and the gate is therefore load-bearing.
+* The checksum is weak by cryptographic standards. It is a tripwire, and it is
+  documented as a tripwire rather than trusted as a signature.
+
+==== Neutral
+
+* The `EE_ABI_FINGERPRINT` value is expected to change whenever the layout changes,
+  and the pinned digest in the two null hosts is expected to change whenever the
+  policy changes (ADR-0006). Both changes should be visible in a diff and explained in
+  the commit message, and neither should be discovered by a host at runtime.

@@ -28,11 +28,23 @@ already uses.
 
 [IMPORTANT]
 ====
-*Status: Phase 0 — identity only. There is no kernel code yet.* This repository was
-minted from the RSR template on 2026-09-20; what exists today is governance, CI,
-machine-readable metadata and an empty, reserved ABI/FFI seam. No behaviour, no
-adapter, and no support matrix entry is claimed. `STATE.a2ml` carries the live
-number (currently 2%), and `docs/developer/DEVELOPMENT-PLAN.adoc` carries the route.
+*Status: Phase 1 complete — the ABI seam is frozen; the kernel is a skeleton.* This
+repository was minted from the RSR template on 2026-09-20. What exists today is the
+seam, end to end and mechanically gated: seven ABI structs proved in Idris2, a
+generated `ee.h` at ABI 1.0 that a C host can compile against, a Zig kernel that
+asserts its own layout at comptime, and two null hosts — one Zig, one C — that agree
+on a pinned 10,000-tick digest. The behaviour itself is deliberately naive: the v0
+rule is five branches over health, ammo, contacts and range. No adapter and no
+support-matrix entry is claimed. `STATE.a2ml` carries the live number (currently 8%),
+`docs/developer/DEVELOPMENT-PLAN.adoc` carries the route, and `just seam-check` is
+the one command that reproduces the claim above.
+
+The whole seam in one command:
+
+[source,shell]
+----
+just seam-check   # model → artefacts → no drift → C header compiles → 28 tests → both hosts agree
+----
 ====
 
 == What this is
@@ -137,8 +149,10 @@ link:docs/architecture/REPOSITORY-MAP.adoc[docs/architecture/REPOSITORY-MAP.adoc
 | Path | What lives there
 
 | `README.adoc`, `CLAUDE.md` | Start here — humans and AI agents respectively.
-| `src/interface/`           | The seam: Idris2 ABI proofs over the Zig FFI, plus generated headers.
-| `src/core/`                | The host-agnostic kernel. Empty until Phase 1 exits.
+| `src/interface/`           | The seam: the Idris2 ABI model and proofs (`Abi/`), the generator (`Abi/Gen.idr`), the Zig C ABI (`ffi/`), and generated artefacts.
+| `src/core/`                | The host-agnostic kernel: fixed-point arithmetic, the deterministic RNG, perception and the v0 decision rule. No behaviour beyond that yet.
+| `include/`                 | `evil_weevil/ee.h` — the public C ABI, generated and committed. The only header a host needs.
+| `tests/host/`              | The null host in C: a game with no game in it, which is how the header and the library are tested as a host sees them.
 | `tests/`, `verification/`  | Tests; proofs and the golden-replay corpus.
 | `docs/`                    | Human documentation, including the development plan and ADRs.
 | `.machine_readable/`       | Descriptiles, contractiles and policies that tools and agents read.

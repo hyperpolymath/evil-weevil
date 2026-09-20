@@ -4,7 +4,7 @@
 :toc:
 :toclevels: 3
 
-*Clade:* `gm` (Games & Interactive) · *Phase:* 0 (identity) · *Written:* 2026-09-20
+*Clade:* `gm` (Games & Interactive) · *Phase:* 1 complete (the ABI seam) · *Written:* 2026-09-20
 
 == The claim, and how we keep it honest
 
@@ -112,10 +112,17 @@ We do not advance on vibes. Each phase has a gate that can fail.
 | Mint from the RSR template; repair mint drift; choose the clade; commit.
 | `just validate` green; no template self-description left in the tree; clade chosen.
 
-| *1. The seam*
+| *1. The seam* (done)
 | `ee.h` v0, Idris2 layout and purity proofs, Zig C ABI, null host, C harness.
 | 10,000-tick harness green; header regenerates byte-identical; a deliberate layout
   break fails the Idris2 proof.
+
+  *Met 2026-09-20:* `just seam-check` runs the whole gate. ABI 1.0, fingerprint
+  18276775, seven structs (8/64/16/184/48/48/72 bytes) proved in `Abi/Layout.idr`,
+  asserted by the C compiler and by Zig at comptime, and exercised by two null hosts
+  that agree on a pinned 10,000-tick digest (4061121875253101873). See ADR-0008 for why
+  the header is generated and committed, and ADR-0006 for the three implementation
+  notes a reader would otherwise have to infer from the code.
 
 | *2. Kernel v0*
 | Perception and memory, utility plus behaviour graph, steering, budget guard.

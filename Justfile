@@ -630,6 +630,8 @@ help-me:
 
 import? "build/just/proofs.just"
 
+import? "build/just/seam.just"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION MANAGEMENT (THIN BINDINGS TO CENTRAL STANDARDS)
 # ═══════════════════════════════════════════════════════════════════════════════

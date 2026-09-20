@@ -107,8 +107,15 @@ fi
 # basename remains as the last fallback for a checkout with no remote.
 REPO_NAME="${GITHUB_REPOSITORY:-}"
 if [ -z "$REPO_NAME" ]; then
-    REPO_NAME="$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null \
-                 | sed -E 's#(\.git)?/?$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
+    # `git config --get` exits 1 when the key is absent, and under `set -euo
+    # pipefail` that killed this script outright — silently, with no message and
+    # status 1, in the one situation that is normal for a fresh local mint: a repo
+    # with no remote yet. A gate that fails without saying anything is worse than
+    # no gate, because the failure looks like a finding. Capture first, then parse.
+    REMOTE_URL="$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null || true)"
+    if [ -n "$REMOTE_URL" ]; then
+        REPO_NAME="$(sed -E 's#(\.git)?/?$##; s#^.*[:/]([^/]+/[^/]+)$#\1#' <<<"$REMOTE_URL")"
+    fi
 fi
 [ -z "$REPO_NAME" ] && REPO_NAME="$(cd "$REPO_ROOT" && basename "$(pwd)")"
 case "$REPO_NAME" in

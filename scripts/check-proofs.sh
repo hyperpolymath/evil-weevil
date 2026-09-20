@@ -157,7 +157,17 @@ done < "$MANIFEST_FILE"
 echo
 echo "=== manifest coverage ($PROOF_DIR) ==="
 listed="$(sort -u "$listed_tmp")"
-found="$(cd "$ROOT" && find "$PROOF_DIR" -name "*.$EXT" -not -path '*/build/*' 2>/dev/null | sort)"
+# A MANIFEST entry may name a module OUTSIDE $PROOF_DIR: the Evil Weevil ABI
+# proofs live in src/interface/Abi/ beside the code they describe, because a
+# proof about the wire format that sits in another tree is a proof nobody updates
+# when the format changes. Such entries are checked like any other (their declared
+# source root is honoured), and are added to the accounted-for set here — otherwise
+# a deliberate out-of-tree entry would be reported as a stale one. Nothing else
+# outside $PROOF_DIR is scanned, so this does not silently widen the gate.
+found="$(cd "$ROOT" && { \
+  find "$PROOF_DIR" -name "*.$EXT" -not -path '*/build/*' 2>/dev/null; \
+  while IFS= read -r p; do [ -f "$p" ] && printf '%s\n' "$p"; done <<< "$listed"; \
+} | sort -u)"
 unlisted="$(comm -13 <(printf '%s\n' "$listed") <(printf '%s\n' "$found") || true)"
 missing="$(comm -23 <(printf '%s\n' "$listed") <(printf '%s\n' "$found") || true)"
 

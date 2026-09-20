@@ -21,19 +21,21 @@ status = "active"
 [project-context]
 name = "Evil Weevil"
 purpose = "A universally injectable enemy-intelligence kernel for computer games: a host-agnostic, deterministic AI core behind an Idris2-verified C ABI over a Zig zero-overhead FFI seam, so enemy behaviour is authored once and injected into whatever engine the game already uses."
-# Phase 0 (identity) is complete; no kernel code exists yet. This number is
-# deliberately low: it counts working behaviour, not scaffolding inherited
-# from the template.
-completion-percentage = 2
+# Phase 1 (the seam) is complete and mechanically enforced: the ABI header is
+# generated from a proved model, both null hosts agree on a pinned 10,000-tick
+# digest, and `just seam-check` fails if any of that stops being true. Phase 2
+# (behaviour) has not started. This number counts working behaviour, not
+# scaffolding inherited from the template.
+completion-percentage = 8
 
 [position]
-phase = "design"           # design | implementation | testing | maintenance | archived
+phase = "implementation"   # design | implementation | testing | maintenance | archived
 maturity = "experimental"  # experimental | alpha | beta | production | lts
 
 [route-to-mvp]
 milestones = [
   { name = "Phase 0: identity — minted from rsr-template-repo, drift repaired, clade chosen, gates green", completion = 100 },
-  { name = "Phase 1: the seam — ee.h v0, Idris2 layout/purity proofs, Zig FFI, null host, 10k-tick harness", completion = 0 },
+  { name = "Phase 1: the seam — ee.h v0, Idris2 layout/purity proofs, Zig FFI, null host, 10k-tick harness", completion = 100 },
   { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 0 },
   { name = "Phase 3: authoring — enemy definition schema (a2ml), compiler, workbench and replay inspector", completion = 0 },
   { name = "Phase 4: adapters — Godot 4, Unity, Unreal, WASM, each passing one conformance kit", completion = 0 },
@@ -42,23 +44,37 @@ milestones = [
 ]
 
 [blockers-and-issues]
-# 1. The ABI seam is unfrozen. No behaviour code and no adapter may start until
-#    Phase 1 exits: an adapter written against a moving header is the one
-#    mistake that would sink the "universally injectable" claim.
+# 1. RESOLVED 2026-09-20 — the ABI seam is frozen at 1.0, fingerprint 18276775.
+#    include/evil_weevil/ee.h and src/interface/generated/ee_layout.zig are
+#    generated from src/interface/Abi/Types.idr, gated by an Idris2 proof suite,
+#    checked by the C compiler's _Static_asserts and by Zig's comptime asserts,
+#    and exercised by two independent null hosts. `just abi-check` fails if either
+#    committed artefact stops matching the model, which is what "frozen" now means
+#    here. No behaviour code and no adapter may change the header without an ADR.
 # 2. Upstream mint defects, measured on this repo's own mint (2026-09-20) and
 #    documented in docs/developer/MINT-NOTES.adoc: (a) RSR_NON_INTERACTIVE=1
 #    cannot complete a mint; (b) template self-descriptions survive substitution
 #    (repaired here by hand — STATE, ECOSYSTEM, CLAUDE.md); (c) the SonarCloud
 #    header comment keeps the template owner (same family as
-#    metadatastician/first-post#11).
+#    metadatastician/first-post#11); (d) check-no-placeholders.sh dies silently
+#    (status 1, no message) on a repo with no git remote, because `git config
+#    --get` exits 1 under `set -e` — found in Phase 1, fixed here, carried
+#    upstream in docs/developer/MINT-NOTES.adoc §5.
 # 3. Registration in gv-clade-index is the OWNER's act, not an agent's, and has
 #    not been done.
+# 4. Phase 1 exit is honest rather than tidy: the v0 rule is naive (five branches
+#    over health, ammo, contacts, range), `ee_init` takes budget_units from a stub,
+#    and v0 consults no randomness at all. Each is deliberate and recorded in
+#    ADR-0006 and the kernel header, not overlooked.
+# 5. Four Idris2 modules remain quarantined in verification/proofs/idris2/MANIFEST
+#    (they are Idris1-era template files that need Data.Nat); the four modules that
+#    define the ABI are gated in src/interface/Abi/ and do compile.
 
 [critical-next-actions]
 actions = [
-  "Write include/evil_weevil/ee.h v0 — capability flags, snapshot and intent layouts, arena allocator, ee_tick — and freeze it",
-  "Encode ABI layout and tick-purity invariants in Idris2 (src/interface/Abi/); implement the C ABI in Zig (src/interface/ffi/)",
-  "Build the null host plus C harness: 10,000 deterministic ticks in CI, header regeneration proven byte-identical",
+  "Phase 2 — perception and memory: give the agent a map of what it has seen, ageing stale contacts, and prove in Abi.Foreign that memory never outlives its tick budget",
+  "Phase 2 — replace the five-branch rule with a utility/behaviour graph while keeping the pinned digest test: a changed policy MUST change that number, deliberately",
+  "Wire `just seam-check` into CI (.github/workflows) so the ABI cannot drift on a machine nobody was watching",
   "File the upstream mint defects against rsr-template-repo",
   "Ratify ADR-0004 (injection modes), ADR-0005 (ABI versioning and capability negotiation), ADR-0006 (determinism policy) before Phase 2 opens",
 ]

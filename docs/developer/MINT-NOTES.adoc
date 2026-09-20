@@ -129,9 +129,26 @@ and dies outside a work tree. Step 4's order matters because `validate-claude-md
 `validate-coapt` and `validate-repo-map` each fail on a stale artifact — which is the
 point of them.
 
-== 5. For the estate
+== 5. A third defect, found in Phase 1
 
-Two things are worth carrying upstream to `rsr-template-repo`:
+Found while running the Phase 1 gates on a repo that — like every fresh local mint —
+has no git remote yet:
+
+`scripts/check-no-placeholders.sh` reads the repo's identity from `GITHUB_REPOSITORY`,
+falling back to `git config --get remote.origin.url`. That command exits 1 when the key
+is absent, and the script runs under `set -euo pipefail`, so on a remote-less repo the
+gate **killed itself silently**: status 1, no output, nothing to read. The fallback to
+the directory basename on the line after it never ran.
+
+The failure mode is the one this estate has been systematically removing — a check that
+fails without saying why, where the failure is indistinguishable from a finding. A
+maintainer sees a red gate and an empty log and starts hunting for a placeholder that
+does not exist. It is fixed here (capture the remote, then parse it), and the fix is
+worth carrying upstream with the other two.
+
+== 6. For the estate
+
+Three things are worth carrying upstream to `rsr-template-repo`:
 
 . `repo-init` should either repair the descriptile self-descriptions or print them as
   required post-mint actions. A mint that is 97% complete as somebody else's template is
@@ -139,3 +156,6 @@ Two things are worth carrying upstream to `rsr-template-repo`:
 . `CLAUDE.md` should be regenerated as part of the mint. It is the file agents read
   first, and it shipped here with the wrong uuid, the wrong clade and the wrong IS-NOT
   boundary.
+. `check-no-placeholders.sh` should survive a repo with no remote (see §5): `|| true` on
+  the `git config` call is the whole fix, and the estate's gates should be runnable in a
+  bare local checkout, because that is how most of them are run the first time.

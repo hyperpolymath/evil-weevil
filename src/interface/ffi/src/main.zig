@@ -1,275 +1,125 @@
 // SPDX-License-Identifier: MPL-2.0
-// Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-// EVIL_WEEVIL FFI Implementation
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
 //
-// This module implements the C-compatible FFI declared in src/abi/Foreign.idr
-// All types and layouts must match the Idris2 ABI definitions.
+// The C ABI, as exported symbols.
 //
+// This file is the boundary and nothing more: it validates arguments, delegates
+// to the kernel, and answers every failure with a status code. It allocates
+// nothing (the host owns `ee_context` and the agent array — ADR-0005 §4), it
+// never calls into the host (ADR-0004), and it contains no policy.
+//
+// The structs and every numeric constant come from `abi.zig`, which asserts the
+// layout at comptime against the numbers `Abi.Gen` emitted from the Idris2 model.
 
-const std = @import("std");
+const abi = @import("abi");
+const kernel = @import("kernel");
 
-// Version information (keep in sync with project)
-const VERSION = "0.1.0";
-const BUILD_INFO = "EVIL_WEEVIL built with Zig " ++ @import("builtin").zig_version_string;
+// ── Introspection ───────────────────────────────────────────────────────────
 
-/// Thread-local error storage
-threadlocal var last_error: ?[]const u8 = null;
-
-/// Set the last error message
-fn setError(msg: []const u8) void {
-    last_error = msg;
-}
-
-/// Clear the last error
-fn clearError() void {
-    last_error = null;
-}
-
-//==============================================================================
-// Core Types (must match src/abi/Types.idr)
-//==============================================================================
-
-/// Result codes (must match Idris2 Result type)
-pub const Result = enum(c_int) {
-    ok = 0,
-    @"error" = 1,
-    invalid_param = 2,
-    out_of_memory = 3,
-    null_pointer = 4,
-};
-
-/// Library handle (opaque to prevent direct access)
-pub const Handle = opaque {
-    // Internal state hidden from C
-    allocator: std.mem.Allocator,
-    initialized: bool,
-    // Add your fields here
-};
-
-//==============================================================================
-// Library Lifecycle
-//==============================================================================
-
-/// Initialize the library
-/// Returns a handle, or null on failure
-export fn evil_weevil_init() ?*Handle {
-    const allocator = std.heap.c_allocator;
-
-    const handle = allocator.create(Handle) catch {
-        setError("Failed to allocate handle");
-        return null;
+pub export fn ee_version_info() abi.EeVersion {
+    return .{
+        .major = @intCast(abi.ABI_MAJOR),
+        .minor = @intCast(abi.ABI_MINOR),
+        .patch = 0,
+        .reserved = 0,
     };
-
-    // Initialize handle
-    handle.* = .{
-        .allocator = allocator,
-        .initialized = true,
-    };
-
-    clearError();
-    return handle;
 }
 
-/// Free the library handle
-export fn evil_weevil_free(handle: ?*Handle) void {
-    const h = handle orelse return;
-    const allocator = h.allocator;
-
-    // Clean up resources
-    h.initialized = false;
-
-    allocator.destroy(h);
-    clearError();
+pub export fn ee_abi_fingerprint() u64 {
+    return abi.ABI_FINGERPRINT;
 }
 
-//==============================================================================
-// Core Operations
-//==============================================================================
-
-/// Process data (example operation)
-export fn evil_weevil_process(handle: ?*Handle, input: u32) Result {
-    const h = handle orelse {
-        setError("Null handle");
-        return .null_pointer;
+/// Human-readable status name. Static storage — the caller must not free it, and
+/// no allocation happens on this path either.
+pub export fn ee_status_name(status: u32) [*:0]const u8 {
+    return switch (status) {
+        abi.STATUS_OK => "ee_ok",
+        abi.STATUS_BAD_PARAM => "ee_bad_param",
+        abi.STATUS_VERSION_MISMATCH => "ee_version_mismatch",
+        abi.STATUS_FINGERPRINT_MISMATCH => "ee_fingerprint_mismatch",
+        abi.STATUS_CAPABILITY_UNSUPPORTED => "ee_capability_unsupported",
+        abi.STATUS_BUFFER_TOO_SMALL => "ee_buffer_too_small",
+        abi.STATUS_PANIC_CAUGHT => "ee_panic_caught",
+        else => "ee_unknown_status",
     };
+}
 
-    if (!h.initialized) {
-        setError("Handle not initialized");
-        return .@"error";
+// ── Init ────────────────────────────────────────────────────────────────────
+
+/// Validate the host's declaration and initialise the caller-owned context.
+///
+/// Every rejection is ANSWERED, not thrown: a version mismatch, a fingerprint
+/// mismatch and a host that cannot hold our agent struct all come back as status
+/// codes with the reason visible, because a host that links successfully and
+/// fails silently at runtime is the failure mode this ABI exists to prevent
+/// (ADR-0005 §2 and §3).
+pub export fn ee_init(desc: ?*const abi.EeInitDesc, ctx: ?*abi.EeContext) u32 {
+    const d = desc orelse return abi.STATUS_BAD_PARAM;
+    const c = ctx orelse return abi.STATUS_BAD_PARAM;
+
+    // The host states the size it compiled against; if it does not match ours,
+    // its struct disagrees with the ABI, and every later call is unsafe.
+    if (d.struct_size != @sizeOf(abi.EeInitDesc)) return abi.STATUS_BUFFER_TOO_SMALL;
+
+    if (d.abi_major != abi.ABI_MAJOR) return abi.STATUS_VERSION_MISMATCH;
+
+    // A zero fingerprint means "not declared": a host may skip the check, but a
+    // host that declares one is held to it.
+    if (d.abi_fingerprint != 0 and d.abi_fingerprint != abi.ABI_FINGERPRINT) {
+        return abi.STATUS_FINGERPRINT_MISMATCH;
     }
 
-    // Example processing logic
-    _ = input;
-
-    clearError();
-    return .ok;
-}
-
-//==============================================================================
-// String Operations
-//==============================================================================
-
-/// Get a string result (example)
-/// Caller must free the returned string
-export fn evil_weevil_get_string(handle: ?*Handle) ?[*:0]const u8 {
-    const h = handle orelse {
-        setError("Null handle");
-        return null;
+    c.* = .{
+        .abi_major = d.abi_major,
+        .flags = d.flags,
+        .capabilities = d.capabilities,
+        .budget_units = if (d.max_agents == 0) 16 else 16,
+        .max_agents = d.max_agents,
+        .reserved0 = 0,
+        .abi_fingerprint = abi.ABI_FINGERPRINT,
+        .rng_seed = d.rng_seed,
+        .tick_rate_num = d.host_tick_num,
+        .tick_rate_den = d.host_tick_den,
+        .ticks_run = 0,
+        .degraded_ticks = 0,
     };
-
-    if (!h.initialized) {
-        setError("Handle not initialized");
-        return null;
-    }
-
-    // Example: allocate and return a string
-    const result = h.allocator.dupeZ(u8, "Example result") catch {
-        setError("Failed to allocate string");
-        return null;
-    };
-
-    clearError();
-    return result.ptr;
+    return abi.STATUS_OK;
 }
 
-/// Free a string allocated by the library
-export fn evil_weevil_free_string(str: ?[*:0]const u8) void {
-    const s = str orelse return;
-    const allocator = std.heap.c_allocator;
+// ── Tick ────────────────────────────────────────────────────────────────────
 
-    const slice = std.mem.span(s);
-    allocator.free(slice);
+/// One agent, one tick. Returns the intent by value: the caller owns nothing, and
+/// nothing is allocated.
+///
+/// Argument validation is deliberately total — every pointer is checked, and a
+/// rejected call returns a status rather than dereferencing anything.
+pub export fn ee_tick(
+    ctx: ?*abi.EeContext,
+    snap: ?*const abi.EeSnapshot,
+    agent: ?*abi.EeAgent,
+    out: ?*abi.EeIntent,
+) u32 {
+    const c = ctx orelse return abi.STATUS_BAD_PARAM;
+    const s = snap orelse return abi.STATUS_BAD_PARAM;
+    const a = agent orelse return abi.STATUS_BAD_PARAM;
+    const o = out orelse return abi.STATUS_BAD_PARAM;
+
+    // A context that was never initialised, or was overwritten, is refused here
+    // rather than producing plausible-looking garbage intents.
+    if (c.abi_major != abi.ABI_MAJOR) return abi.STATUS_VERSION_MISMATCH;
+
+    var intent = kernel.tick(c, s, a);
+    kernel.degradeForCapabilities(c, &intent);
+    o.* = intent;
+    return abi.STATUS_OK;
 }
 
-//==============================================================================
-// Array/Buffer Operations
-//==============================================================================
+// ── Shutdown ────────────────────────────────────────────────────────────────
 
-/// Process an array of data
-export fn evil_weevil_process_array(
-    handle: ?*Handle,
-    buffer: ?[*]const u8,
-    len: u32,
-) Result {
-    const h = handle orelse {
-        setError("Null handle");
-        return .null_pointer;
-    };
-
-    const buf = buffer orelse {
-        setError("Null buffer");
-        return .null_pointer;
-    };
-
-    if (!h.initialized) {
-        setError("Handle not initialized");
-        return .@"error";
-    }
-
-    // Access the buffer
-    const data = buf[0..len];
-    _ = data;
-
-    // Process data here
-
-    clearError();
-    return .ok;
-}
-
-//==============================================================================
-// Error Handling
-//==============================================================================
-
-/// Get the last error message
-/// Returns null if no error
-export fn evil_weevil_last_error() ?[*:0]const u8 {
-    const err = last_error orelse return null;
-
-    // Return C string (static storage, no need to free)
-    const allocator = std.heap.c_allocator;
-    const c_str = allocator.dupeZ(u8, err) catch return null;
-    return c_str.ptr;
-}
-
-//==============================================================================
-// Version Information
-//==============================================================================
-
-/// Get the library version
-export fn evil_weevil_version() [*:0]const u8 {
-    return VERSION.ptr;
-}
-
-/// Get build information
-export fn evil_weevil_build_info() [*:0]const u8 {
-    return BUILD_INFO.ptr;
-}
-
-//==============================================================================
-// Callback Support
-//==============================================================================
-
-/// Callback function type (C ABI)
-pub const Callback = *const fn (u64, u32) callconv(.C) u32;
-
-/// Register a callback
-export fn evil_weevil_register_callback(
-    handle: ?*Handle,
-    callback: ?Callback,
-) Result {
-    const h = handle orelse {
-        setError("Null handle");
-        return .null_pointer;
-    };
-
-    const cb = callback orelse {
-        setError("Null callback");
-        return .null_pointer;
-    };
-
-    if (!h.initialized) {
-        setError("Handle not initialized");
-        return .@"error";
-    }
-
-    // Store callback for later use
-    _ = cb;
-
-    clearError();
-    return .ok;
-}
-
-//==============================================================================
-// Utility Functions
-//==============================================================================
-
-/// Check if handle is initialized
-export fn evil_weevil_is_initialized(handle: ?*Handle) u32 {
-    const h = handle orelse return 0;
-    return if (h.initialized) 1 else 0;
-}
-
-//==============================================================================
-// Tests
-//==============================================================================
-
-test "lifecycle" {
-    const handle = evil_weevil_init() orelse return error.InitFailed;
-    defer evil_weevil_free(handle);
-
-    try std.testing.expect(evil_weevil_is_initialized(handle) == 1);
-}
-
-test "error handling" {
-    const result = evil_weevil_process(null, 0);
-    try std.testing.expectEqual(Result.null_pointer, result);
-
-    const err = evil_weevil_last_error();
-    try std.testing.expect(err != null);
-}
-
-test "version" {
-    const ver = evil_weevil_version();
-    const ver_str = std.mem.span(ver);
-    try std.testing.expectEqualStrings(VERSION, ver_str);
+/// Nothing to free: the kernel owns no memory. Present so a host's teardown path
+/// has a place to call, and so the ABI's shape does not change when Phase 2 does
+/// need per-context release.
+pub export fn ee_shutdown(ctx: ?*abi.EeContext) void {
+    const c = ctx orelse return;
+    c.ticks_run = 0;
 }

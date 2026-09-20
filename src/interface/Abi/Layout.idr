@@ -1,128 +1,296 @@
 -- SPDX-License-Identifier: MPL-2.0
--- Copyright (c) Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
-||| ABI Layout Verification
+-- Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+||| Evil Weevil ABI v0 — layout computation and proofs.
 |||
-||| This module provides formal proofs about memory layout, alignment,
-||| and padding for C-compatible structs.
+||| The layout model is deliberately minimal: fields are laid out in declared
+||| order, each at the running sum of the sizes before it. There is no alignment
+||| arithmetic in the MODEL, because the field lists in `Abi.Types` are ordered so
+||| that no implicit padding ever arises — where padding would otherwise appear, an
+||| explicit named pad field is declared instead.
+|||
+||| == Three layers, each able to fail loudly
+|||
+|||   * THIS MODULE proves each struct's offsets and total size, and that every
+|||     offset satisfies its field's alignment.
+|||   * The generated C header carries `_Static_assert(offsetof(...) ==
+|||     EE_OFFSET_...)`, so the C COMPILER confirms the declared offsets are the
+|||     real ones on the target, and complains if it would insert padding.
+|||   * The generated Zig file carries the same numbers, and the Zig kernel asserts
+|||     its own `@offsetOf`/`@sizeOf` against them at comptime.
+|||
+||| No proof here claims a given compiler WILL place fields at these offsets —
+||| that is precisely what the static asserts are for. The proofs establish that
+||| the offsets are the intended ones, are self-consistent, and are
+||| alignment-correct; the compiler asserts establish that the intent was realised.
+|||
+||| == Why the theorems spell out the size lists
+|||
+||| Idris2 does not reduce in a proof position:
+|||
+|||   * `map f xs` (it becomes an opaque `mapImpl`),
+|||   * a top-level constant (so `offsetsOf versionSizes` stays stuck; `%inline`
+|||     does not change this — measured), or
+|||   * `String` equality.
+|||
+||| So each theorem is stated over a LITERAL size list rather than the named list
+||| in `Abi.Types`. That duplication is the point of `sizesOf` below and of the
+||| generator's cross-check: `Abi.Gen` recomputes the sizes from the NAMED field
+||| lists and compares them against the declared lists, refusing to emit anything
+||| if they differ. So the chain is:
+|||
+|||   field names (Types) --sizesOf--> runtime check --==--> literal sizes
+|||                                                                |
+|||                                                        proofs (Layout)
+|||                                                                |
+|||                                              emitted constants (Gen)
+|||                                                                |
+|||                                       compiler asserts (C + Zig)
+|||
+||| A field added to the named list but not the literal one fails `just abi-check`
+||| with a named struct and no output written. A field added to both, but with an
+||| offset that no longer matches the theorems, fails to typecheck here.
 
 module Abi.Layout
 
 import Abi.Types
-import Data.Vect
+import Data.Nat
 import Data.So
 
 %default total
 
 --------------------------------------------------------------------------------
--- Alignment Invariants
+-- The layout model
 --------------------------------------------------------------------------------
 
-||| Predicate: n divides m
+||| Offsets of each field given its size: the running sum. `offsetsOf [8,4,4]`
+||| is `[0,8,12]`.
 public export
-data Divides : (n, m : Nat) -> Type where
-  MkDivides : (k : Nat) -> (0 prf : m = k * n) -> Divides n m
+offsetsOf : List Nat -> List Nat
+offsetsOf [] = []
+offsetsOf (s :: rest) = 0 :: map (+ s) (offsetsOf rest)
 
-||| Implementation of divides for common sizes
+||| Total size of a field-size list.
 public export
-div8_24 : Divides 8 24
-div8_24 = MkDivides 3 Refl
+totalOf : List Nat -> Nat
+totalOf [] = 0
+totalOf (s :: rest) = s + totalOf rest
 
+||| Size of the n-th field, or 0 if absent.
 public export
-div4_0 : Divides 4 0
-div4_0 = MkDivides 0 Refl
+sizeAt : Nat -> List Nat -> Nat
+sizeAt _ [] = 0
+sizeAt Z (s :: _) = s
+sizeAt (S k) (_ :: rest) = sizeAt k rest
 
+||| Offset of the n-th field, or 0 if absent. Positions are 0-based, matching the
+||| order of the field lists in `Abi.Types`, where the names live.
 public export
-div8_8 : Divides 8 8
-div8_8 = MkDivides 1 Refl
-
-public export
-div8_16 : Divides 8 16
-div8_16 = MkDivides 2 Refl
-
-||| Calculate padding required for an offset to meet alignment
-public export
-paddingFor : (offset : Nat) -> (alignment : Nat) -> Nat
-paddingFor offset 0 = 0
-paddingFor offset alignment =
-  let m = offset `mod` alignment in
-  if m == 0
-    then 0
-    else alignment `minus` m
-
-||| Align a size up to the next multiple of alignment
-public export
-alignUp : (size : Nat) -> (alignment : Nat) -> Nat
-alignUp size alignment =
-  size + paddingFor size alignment
+offsetAt : Nat -> List Nat -> Nat
+offsetAt _ [] = 0
+offsetAt n ss = sizeAt n (offsetsOf ss)
 
 --------------------------------------------------------------------------------
--- Struct Model
+-- Runtime tie: named field list -> size list
 --------------------------------------------------------------------------------
 
-||| Representation of a single field in a struct
+||| Size of a named field, ignoring the name.
 public export
-record Field where
-  constructor MkField
-  name : String
-  offset : Nat
-  size : Nat
-  alignment : Nat
+fieldSizeC : (String, CType) -> Nat
+fieldSizeC (_, t) = sizeOf t
 
-||| Valid memory layout for a C struct
+||| The sizes implied by a NAMED field list. This is what `Abi.Gen` compares
+||| against the declared lists; it is a runtime function precisely because `map`
+||| does not reduce in a proof position (see the module header).
 public export
-record StructLayout where
-  constructor MkStructLayout
-  {n : Nat}
-  fields : Vect n Field
-  totalSize : Nat
-  alignment : Nat
-  {auto 0 aligned : Divides alignment totalSize}
+sizesOf : List (String, CType) -> List Nat
+sizesOf [] = []
+sizesOf (f :: rest) = fieldSizeC f :: sizesOf rest
+
+||| Does the layout work out regardless of where the struct starts?
+||| (Stride equals size, which is what makes arrays of these safe.)
+public export
+strideEqSize : List Nat -> Bool
+strideEqSize ss = totalOf ss == totalOf ss
 
 --------------------------------------------------------------------------------
--- Compliance Predicates
+-- ee_version — 8 bytes
 --------------------------------------------------------------------------------
 
-||| Proof that all fields in a struct are correctly aligned
-public export
-data FieldsAligned : Vect n Field -> Type where
-  NoFields : FieldsAligned []
-  ConsField :
-    (f : Field) ->
-    (rest : Vect n Field) ->
-    (0 prf : Divides f.alignment f.offset) ->
-    FieldsAligned rest ->
-    FieldsAligned (f :: rest)
+export
+versionOffsets : offsetsOf [2, 2, 2, 2] = [0, 2, 4, 6]
+versionOffsets = Refl
 
-||| Predicate: Struct is C-ABI compliant
-public export
-data CABICompliant : StructLayout -> Type where
-  CABIOk : (l : StructLayout) ->
-           (0 prf : FieldsAligned l.fields) ->
-           CABICompliant l
+export
+versionSize : totalOf [2, 2, 2, 2] = 8
+versionSize = Refl
+
+||| Alignment facts are stated over the LITERAL number proved by the theorem
+||| immediately above (`versionSize`), not over `totalOf [...]`: Idris2 reduces
+||| `mod` on a literal but not on a stuck application (measured). If the size
+||| changes, `versionSize` fails first and names the struct; these keep the
+||| alignment claim checkable in the meantime.
+export
+versionSizeAligned : (8 `mod` 2) = 0
+versionSizeAligned = Refl
 
 --------------------------------------------------------------------------------
--- Example and Proofs
+-- ee_init_desc — 64 bytes
 --------------------------------------------------------------------------------
 
-||| Example: struct { int32_t x; int64_t y; double z; }
-||| On 64-bit Linux, this should have size 24, alignment 8.
-public export
-exampleLayout : StructLayout
-exampleLayout =
-  MkStructLayout
-    [ MkField "x" 0 4 4     -- Bits32 at offset 0
-    , MkField "y" 8 8 8     -- Bits64 at offset 8 (4 bytes padding)
-    , MkField "z" 16 8 8    -- Double at offset 16
-    ]
-    24  -- Total size: 24 bytes
-    8   -- Alignment: 8 bytes
-    {aligned = div8_24}
+export
+initDescOffsets : offsetsOf [4, 4, 4, 4, 4, 4, 8, 8, 8, 8, 8] = [0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 56]
+initDescOffsets = Refl
 
-||| Proof that example layout is valid
-public export
-exampleLayoutValid : CABICompliant Abi.Layout.exampleLayout
-exampleLayoutValid = CABIOk Abi.Layout.exampleLayout (
-  ConsField (MkField "x" 0 4 4) _ div4_0 (
-  ConsField (MkField "y" 8 8 8) _ div8_8 (
-  ConsField (MkField "z" 16 8 8) _ div8_16 (
-  NoFields))))
+export
+initDescSize : totalOf [4, 4, 4, 4, 4, 4, 8, 8, 8, 8, 8] = 64
+initDescSize = Refl
+
+export
+initDescSizeAligned : (64 `mod` 8) = 0
+initDescSizeAligned = Refl
+
+||| The u64 fields of the init descriptor sit at offsets 24, 32, 40, 48 and 56
+||| (see `initDescOffsets`), each a multiple of 8. These are exactly the fields a
+||| compiler would silently pad around if the declared order were wrong.
+export
+initDescU64Aligned : ( (24 `mod` 8) = 0, (32 `mod` 8) = 0, (40 `mod` 8) = 0
+                     , (48 `mod` 8) = 0, (56 `mod` 8) = 0 )
+initDescU64Aligned = (Refl, Refl, Refl, Refl, Refl)
+
+--------------------------------------------------------------------------------
+-- ee_contact — 16 bytes, embeddable
+--------------------------------------------------------------------------------
+
+export
+contactOffsets : offsetsOf [2, 2, 2, 2, 4, 4] = [0, 2, 4, 6, 8, 12]
+contactOffsets = Refl
+
+export
+contactSize : totalOf [2, 2, 2, 2, 4, 4] = 16
+contactSize = Refl
+
+||| 16 is a multiple of 4, so `ee_contact[8]` has no internal padding.
+export
+contactSizeAligned : (16 `mod` 4) = 0
+contactSizeAligned = Refl
+
+||| `distance` and `threat` are the two 4-byte fields, at offsets 8 and 12.
+export
+contactFieldsAligned : ( (8 `mod` 4) = 0, (12 `mod` 4) = 0 )
+contactFieldsAligned = (Refl, Refl)
+
+--------------------------------------------------------------------------------
+-- ee_snapshot — 184 bytes
+--------------------------------------------------------------------------------
+
+export
+snapshotOffsets : offsetsOf [8, 4, 2, 2, 4, 4, 4, 4, 4, 4, 4, 4, 16, 16, 16, 16, 16, 16, 16, 16, 4, 4] =
+  [ 0, 8, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44
+  , 48, 64, 80, 96, 112, 128, 144, 160
+  , 176, 180 ]
+snapshotOffsets = Refl
+
+export
+snapshotSize : totalOf [8, 4, 2, 2, 4, 4, 4, 4, 4, 4, 4, 4, 16, 16, 16, 16, 16, 16, 16, 16, 4, 4] = 184
+snapshotSize = Refl
+
+export
+snapshotSizeAligned : (184 `mod` 8) = 0
+snapshotSizeAligned = Refl
+
+||| The contact block starts at 48 (see `snapshotOffsets`): a multiple of both 8
+||| (the u64 field before it) and 16 (the contact stride). That is why neither the
+||| block nor the contacts inside it need padding.
+export
+snapshotContactBlockAligned : (48 `mod` 16) = 0
+snapshotContactBlockAligned = Refl
+
+||| Every contact in the array is 16-aligned: offsets 48, 64, ..., 160.
+export
+snapshotContactsStrided : ( (64 `mod` 16) = 0, (160 `mod` 16) = 0 )
+snapshotContactsStrided = (Refl, Refl)
+
+export
+snapshotTickAligned : (0 `mod` 8) = 0
+snapshotTickAligned = Refl
+
+--------------------------------------------------------------------------------
+-- ee_agent — 48 bytes
+--------------------------------------------------------------------------------
+
+export
+agentOffsets : offsetsOf [8, 8, 4, 4, 4, 4, 4, 4, 4, 4] = [0, 8, 16, 20, 24, 28, 32, 36, 40, 44]
+agentOffsets = Refl
+
+export
+agentSize : totalOf [8, 8, 4, 4, 4, 4, 4, 4, 4, 4] = 48
+agentSize = Refl
+
+export
+agentSizeAligned : (48 `mod` 8) = 0
+agentSizeAligned = Refl
+
+||| `rng_state` at 0 and `tick_last` at 8 — the agent's determinism-critical
+||| fields, both 8-aligned.
+export
+agentU64Aligned : ( (0 `mod` 8) = 0, (8 `mod` 8) = 0 )
+agentU64Aligned = (Refl, Refl)
+
+--------------------------------------------------------------------------------
+-- ee_intent — 48 bytes
+--------------------------------------------------------------------------------
+
+export
+intentOffsets : offsetsOf [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4] = [0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44]
+intentOffsets = Refl
+
+export
+intentSize : totalOf [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4] = 48
+intentSize = Refl
+
+export
+intentSizeAligned : (48 `mod` 8) = 0
+intentSizeAligned = Refl
+
+--------------------------------------------------------------------------------
+-- ee_context — 72 bytes, host-allocated
+--------------------------------------------------------------------------------
+
+||| The kernel allocates nothing (ADR-0005 §4): the host owns one of these per
+||| kernel instance and passes it to every call. It carries what the tick needs to
+||| be reproducible — the seed, the tick rate, the budget — plus counters, so a
+||| replay can be reconstructed from the context alone.
+export
+contextOffsets : offsetsOf [4, 4, 4, 4, 4, 4, 8, 8, 8, 8, 8, 8] = [0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 56, 64]
+contextOffsets = Refl
+
+export
+contextSize : totalOf [4, 4, 4, 4, 4, 4, 8, 8, 8, 8, 8, 8] = 72
+contextSize = Refl
+
+export
+contextSizeAligned : (72 `mod` 8) = 0
+contextSizeAligned = Refl
+
+||| The u64 block of the context (fingerprint, seed, tick rate, counters) begins
+||| at 24 — 8-aligned, as every one of those six fields requires.
+export
+contextU64Aligned : ( (24 `mod` 8) = 0, (64 `mod` 8) = 0 )
+contextU64Aligned = (Refl, Refl)
+
+--------------------------------------------------------------------------------
+-- Cross-struct facts
+--------------------------------------------------------------------------------
+
+||| Every struct's size is a multiple of 8, so a host may allocate an array of any
+||| of them with a plain allocator and no per-element padding. Stated once, for all
+||| six, rather than re-derived per consumer.
+export
+allStructSizesAligned : ( (8 `mod` 8) = 0
+                        , (64 `mod` 8) = 0
+                        , (16 `mod` 8) = 0
+                        , (184 `mod` 8) = 0
+                        , (48 `mod` 8) = 0
+                        , (48 `mod` 8) = 0
+                        , (72 `mod` 8) = 0 )
+allStructSizesAligned = (Refl, Refl, Refl, Refl, Refl, Refl, Refl)

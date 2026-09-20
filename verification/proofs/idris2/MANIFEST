@@ -1,9 +1,23 @@
 # Idris2 proof manifest — read by scripts/check-proofs.sh idris2
 # Format: <source-root>|<module-relative-to-source-root>|gated|quarantine|<note>
 # gated      = must compile.  quarantine = known-broken, must keep failing.
-# Ground-truthed 2026-07-17 with idris2 0.7.0 (developer/tools/opt/pack).
-verification/proofs/idris2|ABI/Foreign.idr|gated| the one shipped Idris2 module that compiles — real content, not a stub
-verification/proofs/idris2|Types.idr|quarantine| Undefined name LTE (needs Data.Nat); Idris1-era template, has never compiled
+# Ground-truthed 2026-09-20 with idris2 0.7.0 (the version the estate pins, and the
+# version these verdicts were measured against).
+#
+# ─── The ABI seam: the modules that actually define the C ABI ─────────────────
+# These live in src/interface/ beside the code they describe, not in this
+# directory. They are gated here anyway, because a proof about the wire format
+# that sits in another tree is a proof nobody updates when the format changes —
+# and the whole point of the seam is that the header cannot move without the
+# proofs moving with it.
+src/interface|Abi/Types.idr|gated| the ABI model: struct fields, fixed-point, version, capability and action codes. Source of truth for the generated header.
+src/interface|Abi/Layout.idr|gated| offset and size proofs for all seven structs, incl. ee_context (72 B). Offsets are proved over literal field lists; see the module header for why.
+src/interface|Abi/Foreign.idr|gated| the tick model and the v0 decision rule (decide/tickModel) with their branch proofs. The kernel in src/core/kernel.zig implements this.
+src/interface|Abi/Gen.idr|gated| the generator itself: cross-checks proven sizes against declared fields and emits ee.h + ee_layout.zig. Gated so a generator that stops compiling cannot pass CI while still producing a plausible header.
+
+# ─── Idris2 material carried from the RSR template ───────────────────────────
+verification/proofs/idris2|ABI/Foreign.idr|gated| the shipped template module that compiles — real content, not a stub
+verification/proofs/idris2|Types.idr|gated| PROMOTED 2026-09-20 from quarantine: the Idris1-era template file typechecks under 0.7.0, so it had been sitting in quarantine as an excuse, not a fact
 verification/proofs/idris2|ABI/Layout.idr|quarantine| Undefined name NonZero (needs Data.Nat); then a genuine unification failure (S ?x vs f .fieldAlignment)
 verification/proofs/idris2|ABI/Platform.idr|quarantine| Undefined name LTE (needs Data.Nat); then Undefined name lteRefl
 verification/proofs/idris2|ABI/Pointers.idr|quarantine| .nonNull declared at quantity 0 (erased) yet projected into a value position, plus a unification failure — design decision, not a typo
