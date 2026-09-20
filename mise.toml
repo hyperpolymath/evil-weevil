@@ -13,7 +13,12 @@ node = "latest"
 python = "latest"
 rust = "latest"
 go = "latest"
-zig = "latest"
+# PINNED, not "latest": the Zig comptime ABI asserts and the generated
+# src/interface/generated/ee_layout.zig are verified against this exact version,
+# and `latest` would silently move under a frozen ABI. Idris2 is NOT listed here
+# (no registry package exists for it) — scripts/install-toolchain.sh installs and
+# verifies both tools, pinned to the same versions CI uses.
+zig = "0.16.0"
 java = "latest"
 bun = "latest"
 deno = "latest"   # was `denojs` — not a registry name
