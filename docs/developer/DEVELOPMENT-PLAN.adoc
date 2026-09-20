@@ -144,7 +144,20 @@ We do not advance on vibes. Each phase has a gate that can fail.
   what exposed a real disagreement between `Abi.Memory`'s written precedence and the
   shipped kernel; the specification was corrected to the measured behaviour and the
   collision is now pinned by theorems on both sides. Adding a behaviour from here is
-  adding a score. Next inside this phase: steering, then the budget guard.
+  adding a score.
+
+  *Landed 2026-09-20:* modes and commitment, the control layer above the graph
+  (ADR-0012). Five modes, three previously-undefined flag bits, and hysteresis by score
+  margin rather than by a dwell counter — so the only new state is the mode itself, the
+  layout does not move, and the ABI stays 1.0. The fixture this exists for ("the wounded
+  duel": health oscillating across the wound threshold at a contact distance where both
+  attacking and fleeing are legal) switches behaviour 99 times per 100 ticks without the
+  margin and zero times with it; both numbers are measured, and both hosts assert the
+  shipped one. The slice also retired the v0-compat anchor honestly, recorded the two
+  digests that moved in ADR-0006's history table, and took the first INV-category proof
+  in the estate's own taxonomy. Next inside this phase: the TLA+ instance of this same
+  transition relation (inherited scaffolding with no gate behind it is not evidence),
+  then steering and the rest of the budget guard.
 
 | *3. Authoring*
 | Enemy definition schema (a2ml), compiler, workbench, replay inspector.

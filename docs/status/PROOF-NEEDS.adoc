@@ -16,7 +16,7 @@
 | Code | Meaning | Applies?
 
 | *TP* | Typing Proofs (type soundness, type safety) | Yes
-| *INV* | Invariant Proofs (state machines, monotonicity, bounds) |
+| *INV* | Invariant Proofs (state machines, monotonicity, bounds) — INV-1 below is the first one |
 | *SEC* | Security Proofs (crypto, injection freedom, access control) |
 | *CONC* | Concurrency Proofs (linearizability, deadlock freedom) |
 | *ALG* | Algorithm Proofs (termination, correctness, bounds) |
@@ -41,6 +41,7 @@ These proofs come from the evil-weevil and MUST be present in every repo:
 | ABI-5 | C ABI compliance (`CABICompliant`, `FieldsAligned`) | Done 2026-09-20 | `verification/proofs/idris2/ABI/Compliance.idr`
 | ABI-6 | THE SEAM ITSELF: model, layout, tick rule and the generator's refusals | Done 2026-09-20 | `src/interface/Abi/{Types,Layout,Foreign,Gen}.idr` (gated in the MANIFEST, checked by `just proof-check-idris2`) |
 | ABI-7 | THE RULES: v0's decision rule, perception memory, and the utility graph's agreement with BOTH — including the one moment where a score alone would have decided differently | Done 2026-09-20 | `src/interface/Abi/{Foreign,Memory,Utility}.idr` (gated in the MANIFEST; the graph's claim is checked against the three pinned digests, not only against itself) |
+| ABI-8 | CONTROL LAYER: mode encoding round-trips, the mask cannot clobber the memory flag, and commitment holds a mode only while it still applies | Done 2026-09-20 | `src/interface/Abi/Modes.idr` — the first INV-category proof (state-machine invariants), plus the S2 assertions in both null hosts |
 |===
 
 === Typing Proofs (Prover Varies)

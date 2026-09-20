@@ -146,6 +146,22 @@ const UTILITY_ATTACK: u32 = 52428; // 0.80
 const UTILITY_INVESTIGATE: u32 = 32768; // 0.50
 const UTILITY_ADVANCE: u32 = 26214; // 0.40
 
+/// What the agent is already doing is worth this much more than a challenger, in the
+/// same units: 8192 is 0.125 (ADR-0012, `Abi.Modes.stickiness`).
+///
+/// This is the whole of the hysteresis mechanism. There is no dwell counter and no
+/// timer: the incumbent's score is boosted, so a challenger must beat it by MORE than
+/// this margin to take over. Enter and exit thresholds differ, so tick-to-tick
+/// flapping requires a swing larger than the margin rather than a rounding error at a
+/// boundary.
+///
+/// The boost can only hold a mode that still applies, because a mode whose
+/// precondition fails scores zero and 0 + 8192 loses to any real score. Commitment
+/// never becomes blindness: `Abi.Modes.engagementEndsWhenTheContactLeaves` pins it.
+///
+/// Not emitted to `ee.h`: the mode is ABI, the margin is policy (ADR-0010 §3).
+const MODE_STICKINESS: u32 = 8192;
+
 /// The candidates, in tie-break order — the model's `allCandidates`. The order is
 /// v0's branch order, because a tie the scores cannot settle should be settled the
 /// way the chain settled it, and the order is checked against the model, which
@@ -215,11 +231,22 @@ fn candidatesFor(near: ?Nearest, memory_fresh: bool) []const u32 {
     return &CANDIDATES;
 }
 
-fn chooseAction(snap: *const abi.EeSnapshot, near: ?Nearest, memory_fresh: bool) u32 {
+/// The best action for this moment, given what the agent is already doing.
+///
+/// `incumbent_mode` is the S2 layer (ADR-0012): the action the agent is committed to
+/// gets `MODE_STICKINESS` added to its score, so the graph still ranks the tactics and
+/// the margin damps the ranking. Ties break toward the earlier candidate, as before.
+fn chooseAction(
+    snap: *const abi.EeSnapshot,
+    near: ?Nearest,
+    memory_fresh: bool,
+    incumbent_mode: u32,
+) u32 {
     var best_action: u32 = abi.ACTION_HOLD;
     var best_score: u32 = 0;
     for (candidatesFor(near, memory_fresh)) |a| {
-        const sc = utilityOf(a, snap, near, memory_fresh);
+        var sc = utilityOf(a, snap, near, memory_fresh);
+        if (modeForAction(a) == incumbent_mode) sc += MODE_STICKINESS;
         if (sc > best_score) {
             best_score = sc;
             best_action = a;
@@ -237,7 +264,7 @@ fn chooseAction(snap: *const abi.EeSnapshot, near: ?Nearest, memory_fresh: bool)
 pub fn decide(snap: *const abi.EeSnapshot, agent: *const abi.EeAgent) Decision {
     const near = nearestContact(snap);
 
-    switch (chooseAction(snap, near, memoryFresh(agent))) {
+    switch (chooseAction(snap, near, memoryFresh(agent), modeOf(agent))) {
         abi.ACTION_RELOAD => return .{
             .action = abi.ACTION_RELOAD,
             .target = 0,
@@ -335,6 +362,32 @@ pub fn decide(snap: *const abi.EeSnapshot, agent: *const abi.EeAgent) Decision {
 /// The comparison is against `abi.memory_ttl`, the constant Abi.Gen emits from the
 /// model — the same 36 that `Abi.Memory`'s theorems pin (`freshJustBeforeTtl`,
 /// `staleAtTtl`). The kernel does not get to have its own idea of the TTL.
+/// The mode the agent is in, read back out of the flags word (ADR-0012).
+pub fn modeOf(agent: *const abi.EeAgent) u32 {
+    return (agent.flags & abi.AGENT_MODE_MASK) >> abi.AGENT_MODE_SHIFT;
+}
+
+/// Write the mode without disturbing bit 0. The mask is a multiple of two, so the
+/// memory flag is outside it — proved in `Abi.Types.agentModeMaskLeavesBitZeroAlone`,
+/// asserted here because a mode write that cleared `MEMORY_VALID` would look like an
+/// agent forgetting things at random.
+pub fn setMode(agent: *abi.EeAgent, mode: u32) void {
+    agent.flags = (agent.flags & ~abi.AGENT_MODE_MASK) |
+        ((mode << abi.AGENT_MODE_SHIFT) & abi.AGENT_MODE_MASK);
+}
+
+/// The mode an action belongs to. HOLD and the actions nothing produces yet are the
+/// neutral mode, exactly as `Abi.Modes.actionMode` says.
+pub fn modeForAction(action: u32) u32 {
+    return switch (action) {
+        abi.ACTION_RELOAD => abi.AGENT_MODE_RELOAD,
+        abi.ACTION_FLEE => abi.AGENT_MODE_EVADE,
+        abi.ACTION_ATTACK => abi.AGENT_MODE_ENGAGE,
+        abi.ACTION_INVESTIGATE => abi.AGENT_MODE_INVESTIGATE,
+        else => abi.AGENT_MODE_ADVANCE,
+    };
+}
+
 fn memoryFresh(agent: *const abi.EeAgent) bool {
     return (agent.flags & abi.AGENT_FLAG_MEMORY_VALID) != 0 and
         agent.memory_age < abi.memory_ttl;
@@ -441,6 +494,10 @@ pub fn tick(
     if (from_memory) flags |= abi.INTENT_FLAG_FROM_MEMORY;
 
     agent.tick_last = snap.tick;
+    // The mode is the decision's action, not the post-degradation one: what the agent
+    // is committed to is what it decided, and `degradeForCapabilities` is the host's
+    // answer to what the world allows (ADR-0012 §4).
+    setMode(agent, modeForAction(d.action));
     agent.cached_action = d.action;
     agent.cached_target = d.target;
     agent.budget_used = used;

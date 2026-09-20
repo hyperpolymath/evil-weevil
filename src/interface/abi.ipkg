@@ -41,3 +41,4 @@ modules = Abi.Types
         , Abi.Foreign
         , Abi.Memory
         , Abi.Utility
+        , Abi.Modes

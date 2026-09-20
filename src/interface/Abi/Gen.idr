@@ -109,6 +109,28 @@ public export
 allAgentFlags : List (String, Nat)
 allAgentFlags = [ ("MEMORY_VALID", agentFlagMemoryValid) ]
 
+||| The agent's mode field (ADR-0012): a shift, a mask and the codes that go in it.
+||| Emitted because the mode IS on the wire — it lives in `ee_agent.flags`, which the
+||| host owns and can inspect — unlike the margin that produces it, which is policy and
+||| stays out of the header (ADR-0010 §3).
+agentModeDefine : (String, Nat) -> String
+agentModeDefine (n, v) = "#define EE_AGENT_MODE_" ++ n ++ " " ++ show v ++ "u"
+
+agentModeZigConst : (String, Nat) -> String
+agentModeZigConst (n, v) = "pub const AGENT_MODE_" ++ n ++ ": u32 = " ++ show v ++ ";"
+
+public export
+allAgentModes : List (String, Nat)
+allAgentModes =
+  [ ("SHIFT", agentModeShift)
+  , ("MASK", agentModeMask)
+  , ("ADVANCE", agentModeAdvance)
+  , ("ENGAGE", agentModeEngage)
+  , ("EVADE", agentModeEvade)
+  , ("RELOAD", agentModeReload)
+  , ("INVESTIGATE", agentModeInvestigate)
+  ]
+
 --------------------------------------------------------------------------------
 -- Checksumming the layout
 --------------------------------------------------------------------------------
@@ -312,6 +334,8 @@ renderHeader =
              ++ unlines (map intentFlagDefine allIntentFlags)
              ++ "\n/* Bits in ee_agent.flags. */\n"
              ++ unlines (map agentFlagDefine allAgentFlags)
+             ++ "\n/* The mode field inside ee_agent.flags: bits 1..3 (ADR-0012). */\n"
+             ++ unlines (map agentModeDefine allAgentModes)
              ++ "\n"
              ++ "/* Ticks a sighting stays actionable before the agent forgets it (Phase 2). */\n"
              ++ "#define EE_MEMORY_TTL " ++ show memoryTtl ++ "u\n\n"
@@ -355,6 +379,7 @@ zigPreamble =
       ++ [ "" ]
       ++ map intentFlagZigConst allIntentFlags
       ++ map agentFlagZigConst allAgentFlags
+      ++ map agentModeZigConst allAgentModes
       ++ [ "pub const memory_ttl: u32 = " ++ show memoryTtl ++ ";" ]
       ++ [ "" ] )
 

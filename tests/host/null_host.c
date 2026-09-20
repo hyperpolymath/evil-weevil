@@ -211,6 +211,87 @@ static uint64_t run_chase_trace(uint64_t seed, ee_context *ctx_out,
     return digest;
 }
 
+/* "The wounded duel" (ADR-0012): one contact at 40000 — inside attack range (65536)
+ * and inside flee range (131072) — with health oscillating across the wounded
+ * threshold (16384) every tick. Two behaviours are legal and adjacent, so an
+ * uncommitted rule changes its mind every tick; MEASURED, the graph alone switches 99
+ * times in 100 ticks and the committed rule switches zero. */
+static ee_snapshot make_flap_snapshot(uint64_t t)
+{
+    const int wounded = (t % 2u) == 1u;
+    ee_snapshot s = make_snapshot(t);
+    s.health = (ee_fx)(wounded ? 16383 : 16384);
+    s.ammo = (ee_fx)(3 * EE_FX_ONE);
+    s.contact_count = 1u;
+    s.contact0.id = 11;
+    s.contact0.bearing_cos = 16384;
+    s.contact0.bearing_sin = 8192;
+    s.contact0.distance = 40000;
+    s.contact0.threat = (ee_fx)(EE_FX_ONE / 2);
+    return s;
+}
+
+static uint64_t run_flap_trace(uint64_t seed, ee_context *ctx_out,
+                               unsigned counts[9], unsigned *switches,
+                               unsigned *mode_switches)
+{
+    ee_init_desc desc;
+    memset(&desc, 0, sizeof desc);
+    desc.struct_size = (uint32_t)sizeof desc;
+    desc.abi_major = EE_ABI_MAJOR;
+    desc.capabilities = EE_CAP_NAVMESH | EE_CAP_LINE_OF_SIGHT;
+    desc.max_agents = 1;
+    desc.rng_seed = seed;
+    desc.abi_fingerprint = EE_ABI_FINGERPRINT;
+
+    ee_context ctx;
+    memset(&ctx, 0, sizeof ctx);
+    if (ee_init(&desc, &ctx) != EE_STATUS_OK) {
+        failures++;
+        return 0;
+    }
+
+    ee_agent agent;
+    memset(&agent, 0, sizeof agent);
+    agent.rng_state = seed;
+
+    memset(counts, 0, 9u * sizeof counts[0]);
+    *switches = 0;
+    *mode_switches = 0;
+
+    uint64_t digest = 0;
+    uint32_t prev_action = 0;
+    int have_prev = 0;
+    uint32_t prev_mode = 0;
+    for (uint64_t t = 0; t < 100u; ++t) {
+        ee_snapshot snap = make_flap_snapshot(t);
+        ee_intent intent;
+        memset(&intent, 0, sizeof intent);
+        if (ee_tick(&ctx, &snap, &agent, &intent) != EE_STATUS_OK) {
+            failures++;
+            break;
+        }
+        if (intent.action < 9u)
+            counts[intent.action]++;
+        if (have_prev && prev_action != intent.action)
+            (*switches)++;
+        const uint32_t mode = (agent.flags & EE_AGENT_MODE_MASK) >> EE_AGENT_MODE_SHIFT;
+        if (have_prev && prev_mode != mode)
+            (*mode_switches)++;
+        prev_action = intent.action;
+        prev_mode = mode;
+        have_prev = 1;
+
+        digest = digest * 1099511628211ULL + intent.action;
+        digest = digest * 1099511628211ULL + intent.target_id;
+        digest = digest * 1099511628211ULL + (uint64_t)(int64_t)intent.move_x;
+        digest = digest * 1099511628211ULL + intent.flags;
+        digest = digest * 1099511628211ULL + mode;
+    }
+    if (ctx_out) *ctx_out = ctx;
+    return digest;
+}
+
 int main(void)
 {
     /* Layout, as this compiler produced it. The header already asserted these at
@@ -263,13 +344,14 @@ int main(void)
      * number — that is the point. When you change it on purpose, change it in both
      * places and say why in ADR-0006.
      *
-     * It MOVED when Phase 2 wired memory in (from 4061121875253101873), and the
-     * reason is not a mystery: this fixture has zero-contact ticks, so the new
-     * branch fires inside it. The old number did not disappear — it moved one
-     * check down, where it now asserts something stronger than it did before. */
-    check(first == 14165495496352896129ULL, "the trace digest matches the pinned value");
-    check(v0 == 4061121875253101873ULL,
-          "a host that clears the memory flag gets EXACTLY v0's trace (ADR-0009)");
+     * It has MOVED TWICE, both times deliberately, as ADR-0006 requires:
+     *   4061121875253101873  ->  14165495496352896129  memory wired in (ADR-0009)
+     *   14165495496352896129 ->  11339491356780309808  modes and the margin (ADR-0012)
+     * A digest that moves when policy changes is the mechanism working; a digest that
+     * moves with no recorded reason is the mechanism failing. */
+    check(first == 11339491356780309808ULL, "the trace digest matches the pinned value");
+    check(v0 == 1235117735680515552ULL,
+          "the memory-off trace is stable and pinned (the v0 claim is RETIRED: modes changed it — ADR-0012)");
     check(first != v0, "memory is consulted in the default configuration — the check above is not vacuous");
     check(ctx_a.ticks_run == 10000u, "the context counted every tick");
 
@@ -293,6 +375,26 @@ int main(void)
         check(from_memory == counts[EE_ACTION_INVESTIGATE],
               "the FROM_MEMORY flag is set on investigate and nowhere else");
         check(ctx_m.ticks_run == 10000u, "the chase context counted every tick");
+    }
+
+    /* The S2 layer's own fixture: a moment where two behaviours are both legal and
+     * adjacent, so an uncommitted rule flaps. Measured both ways on this fixture over
+     * 100 ticks: 99 action switches for the graph alone, 0 with the margin. */
+    {
+        ee_context ctx_f;
+        unsigned counts[9];
+        unsigned switches = 0, mode_switches = 0;
+        const uint64_t flap = run_flap_trace(0xEE0000000000001ULL, &ctx_f, counts,
+                                             &switches, &mode_switches);
+        printf("  flap digest: %llu (attack=%u flee=%u switches=%u mode_switches=%u)\n",
+               (unsigned long long)flap, counts[EE_ACTION_ATTACK],
+               counts[EE_ACTION_FLEE], switches, mode_switches);
+        check(flap == 5191914376283395890ULL, "the flap digest matches the pinned value");
+        check(switches == 0u, "the committed agent never changes its mind in 100 ticks");
+        check(mode_switches == 0u, "and its mode never changes either");
+        check(counts[EE_ACTION_ATTACK] == 100u, "it attacks on every tick");
+        check(counts[EE_ACTION_FLEE] == 0u, "and never flees, though fleeing is legal here");
+        check(ctx_f.ticks_run == 100u, "the flap context counted every tick");
     }
 
     /* The TTL boundary, watched at the agent rather than only in the model: 65

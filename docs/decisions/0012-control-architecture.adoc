@@ -1,0 +1,222 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// Copyright (c) 2026 Jonathan D.A. Jewell (metadatastician) <j.d.a.jewell@open.ac.uk>
+= Architecture Decision Record: 0012-control-architecture
+
+== 12. Modes, margins, and the layers above and below them
+
+Date: 2026-09-20
+
+=== Status
+
+Accepted (implemented in the same change: modes, margin, proofs, both hosts, a new
+fixture and its pin). Sections 5 and 6 record what is deliberately REFUSED and what is
+deliberately postponed, which in this repository is part of the decision.
+
+=== Context
+
+The utility graph (ADR-0010) decides well and commits to nothing. It is memoryless per
+tick, so two moments whose scores differ by one unit produce two different behaviours.
+At a boundary where two behaviours are both legal and adjacent, that is a coin-flip
+every tick, and a behaviour that changes every tick cannot be observed, tuned by a
+designer, or played against.
+
+The slice was asked for as "an FSM layer", in the course of a larger question about how
+far the control architecture should go. That larger question is worth answering in the
+record rather than in conversation, because half of it is a decision about LAYERS and
+half of it is a decision about what this project is allowed to become.
+
+=== Decision
+
+==== 1. The layers, named after Beer's Viable System Model, because they already exist
+
+The mapping is not decoration. Every layer below was forced by an existing constraint,
+and naming them makes the gaps visible:
+
+[cols="1,2,2", options="header"]
+|===
+| Layer | What it is here | State
+
+| S1 operations
+| the utility graph: `Abi.Utility`, `chooseAction`, the weights
+| EXISTS (ADR-0010), unchanged by this ADR
+
+| S2 coordination
+| MODES and the margin: `Abi.Modes` — which behaviour is in play, and how readily it changes
+| **this ADR**
+
+| S3 inside-and-now control
+| the budget guard: `workUnits`, `degradeForCapabilities`, `INTENT_FLAG_DEGRADED`
+| EXISTS, minimal; to be completed in this phase
+
+| S3* audit
+| the two null hosts' censuses, four pinned digests, tick-by-tick trace comparison
+| EXISTS; becomes the replay inspector in Phase 3
+
+| S4 outside-and-future
+| prediction, lookahead, opponent modelling
+| NOT BUILT, and cannot be by this ADR — see §5
+
+| S5 identity
+| authored archetype, ADR-governed weights, ABI invariants
+| PARTIAL: real S5 arrives with the Phase 3 schema
+|===
+
+So "a layered architecture" is not a rewrite being proposed. It is the name of what the
+constraints produced, with two layers missing and named.
+
+==== 2. Modes select the behaviour; the graph still decides the tactic
+
+A mode is a commitment to one of the five behaviours the graph can already produce —
+ADVANCE (neutral), ENGAGE, EVADE, RELOAD, INVESTIGATE. Modes do not score and do not
+choose: they determine which behaviour is in play for the tick, and the graph's scores
+still order the tactics inside it. Concretely, `Abi.Modes` reuses `Abi.Utility.candidates`
+rather than re-deriving a candidate list, so the one moment with a candidate set of
+exactly one (nothing visible, a fresh lead — ADR-0010 §4) has a mode set of exactly one
+too, and the `t = 85` collision cannot be reintroduced by this layer. That is a theorem,
+not an intention: `theMemorySingletonSurvivesCommitment`.
+
+==== 3. Hysteresis by margin, not by counter
+
+Every mode-selection mechanism that uses a threshold can oscillate, and the usual fix —
+"stay in this mode for N ticks" — costs state. This does not. The incumbent mode's score
+is boosted by `stickiness` (8192, i.e. 0.125 in the scores' Q16.16 units), so a
+challenger must beat the incumbent by MORE than the margin. Enter and exit thresholds
+differ; oscillation requires a swing larger than the margin rather than a rounding error
+at a boundary; and the only state is the mode itself.
+
+That state is three bits of `ee_agent.flags` which the freeze left undefined — bits 1..3,
+with bit 0 already defined as `EE_AGENT_FLAG_MEMORY_VALID` by ADR-0009. No field was
+added, no struct grew, the layout checksum did not move, the fingerprint is still
+18276775, and ABI stays 1.0. The header change is additive: seven new `#define`s.
+
+Two safety properties are proved rather than asserted:
+
+* **The margin cannot hold a mode that no longer applies.** A mode whose precondition
+  has failed scores zero, and `0 + 8192` loses to any real score. Commitment must not
+  become blindness: `engagementEndsWhenTheContactLeaves`.
+* **The margin cannot hold a mode against a real precedence.**
+  `reloadOutranksAnEngagedAgent`: an agent with no ammunition reloads even mid-fight and
+  wounded, because reload (65536) clears the engaged bonus (52428 + 8192 = 60620). This
+  is the corrected reading of the precedence that `Abi.Memory` once got wrong (ADR-0010
+  §4), now stated where a mode could have quietly overridden it.
+
+==== 4. The measured evidence, and the price
+
+The fixture is "the wounded duel": one contact at 40000 — inside attack range (65536)
+and inside flee range (131072) — with health oscillating across the wounded threshold
+(16384) every tick. Two behaviours are legal and adjacent, which is the only kind of
+moment this slice can be judged on.
+
+[cols="1,1,1", options="header"]
+|===
+| Reading | Action switches in 100 ticks | Attack / flee split
+
+| the graph alone (margin 0) | **99** | 50 / 50
+| with the margin (shipped) | **0** | 100 / 0
+|===
+
+The counterfactual was measured by setting the margin to zero and running the same
+fixture, not by reasoning about it. Both hosts assert the shipped reading: the digest
+`5191914376283395890`, zero action changes, zero mode changes, attack on all 100 ticks.
+
+The price, recorded rather than discovered later:
+
+* An engaged, wounded agent at close range no longer breaks off on the strength of the
+  wound alone. In the 200-tick census the mix moves from reload=10 advance=75 attack=50
+  flee=26 hold=0 investigate=39 to **reload=10 advance=75 attack=62 flee=14 hold=0
+  investigate=39**. That is the intended effect of commitment and it is also a real
+  behaviour change for anyone who liked the old one.
+* Two digests moved: the 10,000-tick trace (14165495496352896129 →
+  11339491356780309808) and the memory-opted-out trace (4061121875253101873 →
+  1235117735680515552). The chase digest did NOT move, because its contact is at 196608,
+  beyond attack range, so no engage/evade boundary is reached and S2 has nothing to damp.
+  All four are in ADR-0006's table with their history.
+* **The v0-compat anchor is retired.** That pin was evidence that memory was additive
+  (ADR-0009 §5) — a claim about memory, which remains true of memory. It cannot stay
+  v0's number once the rule itself changes, and a compat number that quietly starts
+  measuring something else is worse than no compat number. The test is renamed and the
+  claim is retired in place.
+
+==== 5. S4 — prediction and multipath — is postponed to its own ADR, and cannot be faked
+
+Multipath prediction or model-predictive control is a legitimate next layer, and this
+ADR does not reject it. It records that it is an ABI decision before it is an algorithm
+decision:
+
+* Prediction needs more world state than the snapshot carries. Today `ee_snapshot`
+  offers contacts with id, flags, bearing, distance and threat, and no velocities,
+  terrain or opponent model. ADR-0005 §5 is explicit: additive changes are a minor
+  version, and anything that changes an existing field's meaning, size or offset is a
+  major version requiring a new ADR. So S4 lands with a designed ABI move and a
+  capability bit, not as a code change.
+* ADR-0006 binds the implementation: no floating point, no clock, fixed iteration order,
+  bit-exact replays. A predictor must therefore expand in a fixed order and a bounded
+  depth, and if it consumes the randomness it does so deterministically and the fact goes
+  in the digest ledger.
+* The budget guard is the substrate that makes it safe: depth and width are budgeted per
+  tick, exhaustion yields the best-so-far with `INTENT_FLAG_DEGRADED` set, and the
+  finiteness of the expansion is a proof obligation like any other.
+
+==== 6. Obfuscation is refused in the kernel; the goal behind it is met differently
+
+Asked whether the design should use stealth, armouring, and polymorphic or metamorphic
+code to make the enemy harder to learn from, the answer recorded here is NO — for the
+kernel, and not on taste grounds:
+
+* **It breaks the project's central promise.** Metamorphic or polymorphic behaviour means
+  the same inputs do not reproduce the same trace. Bit-exact determinism and replayable
+  digests are the headline claim (ADR-0006), and the feature a studio values most is
+  reproducing a bug from a replay. Trading that for obfuscation is a bad trade, and it is
+  not reversible once hosts depend on it.
+* **Obfuscation is the weak form of the goal.** "Players cannot learn the tricks" is
+  better served by the architecture that already exists: policy weights are NOT ABI
+  (ADR-0010 §3), so each archetype carries its own weight table and candidate set;
+  seed-derived variation within authored bands is deterministic per seed and unreadable
+  in aggregate; and Phase 6's offline calibration is the principled answer to a player
+  who adapts. Reading the binary does not help if the policy is per-archetype,
+  seed-perturbed and adapting — and S5 invariants prove the variation cannot produce
+  nonsense.
+* **Anti-tamper belongs to the host and the loader.** Packing, anti-debug and protection
+  of authored content are legitimate, separate deliverables, and they never enter the
+  proved kernel or its ABI. This project also supports server-authoritative use, where
+  the player never holds the logic and obfuscation buys nothing.
+* **"Stealth" needs disambiguating.** Stealth as BEHAVIOUR — cover-seeking, concealment,
+  silent approach — is excellent and belongs in the graph as a scored tactic and an
+  archetype trait (Phases 5 and 6). Stealth as anti-reverse-engineering is the thing
+  above. Same word, unrelated techniques; the first is planned, the second is refused.
+
+The refusal is recorded because a refusal that is not written down gets re-proposed every
+few months, and because "we decided not to" and "we never thought about it" look identical
+in a repository that does not say which.
+
+==== 7. A relational core is approved OFFLINE, and stays there
+
+miniKanren-style relational search is approved as offline tooling and refused inside the
+tick path: the kernel must be allocation-free, deterministic in branch order, and
+provably terminating, and unification with a search order is none of those. It also has a
+concrete job that has already paid for itself — the `t = 85` collision (ADR-0010 §4) is a
+relation over the fixture (`contact_count %% 5 = 0` AND `ammo` drained by `%% 17`), which
+is exactly the query a relational engine answers before a digest moves rather than after.
+
+Implementation follows the repository's proof standard, not a novelty budget: an
+Idris2-typed relational core, bounded search with termination proofs, gated by the same
+`just proof-check-idris2` manifest as everything else. Where it runs — the generator, the
+test harness, the Phase 3 replay inspector — is tooling, and tooling does not get to
+change the kernel's ABI.
+
+=== Consequences
+
+* Adding a behaviour now has three places it can go, in order of preference: a SCORE (a
+  tactic against a visible contact), a MODE (a new kind of commitment), or a layer above
+  with its own ADR. Inserting a branch into a chain is no longer one of them, and has not
+  been since ADR-0010.
+* The three spare bits in the mode field are a budget, not a promise: three more modes
+  can land without a layout change, and the fourth needs a major version with an ADR.
+  `modesFitInTheMask` states the current headroom.
+* The estate's own proof taxonomy gains its first INV-category entry — state-machine
+  invariants — which `docs/status/PROOF-NEEDS.adoc` had declared and left empty since the
+  mint.
+* A TLA+ instance of this same transition relation is the intended second check: the
+  template at `verification/proofs/tlaplus/StateMachine.tla` is inherited scaffolding with
+  no `just` target behind it, and this is the model it was waiting for. That is the next
+  step, and it is NOT claimed as done here.

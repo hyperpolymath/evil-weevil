@@ -24,13 +24,14 @@ purpose = "A universally injectable enemy-intelligence kernel for computer games
 # Phase 1 (the seam) is complete and mechanically enforced: the ABI header is
 # generated from a proved model, both null hosts agree on three pinned digests,
 # and `just seam-check` fails if any of that stops being true. Phase 2 has landed
-# both halves it has started: perception and memory — an agent that loses a contact
-# investigates where it went, for at most memory_ttl ticks, then forgets — and the
-# decision rule itself, rewritten as a utility graph so a behaviour can be added by
-# adding a score. Still to come inside Phase 2: steering, budget guard, golden
-# replays. This number counts working behaviour, not scaffolding and not
-# specifications.
-completion-percentage = 22
+# three slices: perception and memory — an agent that loses a contact investigates
+# where it went, for at most memory_ttl ticks, then forgets; the decision rule itself,
+# rewritten as a utility graph so a behaviour can be added by adding a score; and the
+# control layer above it, where modes commit the agent to a behaviour and a score
+# margin stops it flapping every tick (ADR-0012). Still to come inside Phase 2:
+# steering, the rest of the budget guard, golden replays. This number counts working
+# behaviour, not scaffolding and not specifications.
+completion-percentage = 26
 
 [position]
 phase = "implementation"   # design | implementation | testing | maintenance | archived
@@ -40,7 +41,7 @@ maturity = "experimental"  # experimental | alpha | beta | production | lts
 milestones = [
   { name = "Phase 0: identity — minted from rsr-template-repo, drift repaired, clade chosen, gates green", completion = 100 },
   { name = "Phase 1: the seam — ee.h v0, Idris2 layout/purity proofs, Zig FFI, null host, 10k-tick harness", completion = 100 },
-  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 50 },  # memory (ADR-0009) and the utility graph (ADR-0010) are done end to end; steering, budget guard and golden replays remain
+  { name = "Phase 2: kernel v0 — perception/memory, utility + behaviour graph, steering, budget guard, golden replays", completion = 65 },  # memory (ADR-0009), the utility graph (ADR-0010) and modes/commitment (ADR-0012) are done end to end; steering, the rest of the budget guard and golden replays remain
   { name = "Phase 3: authoring — enemy definition schema (a2ml), compiler, workbench and replay inspector", completion = 0 },
   { name = "Phase 4: adapters — Godot 4, Unity, Unreal, WASM, each passing one conformance kit", completion = 0 },
   { name = "Phase 5: populations — squads and roles, spawn director, threat curve, crowd LOD", completion = 0 },
@@ -83,6 +84,12 @@ milestones = [
 #    hold, and the org refuses classic tokens outright (org-wide policy). A transfer is a
 #    browser click for an org admin; ADR-0011 records the measurement. The 55 identity
 #    references in the tree are deliberately NOT rewritten to the staging location.
+# 8. DECIDED 2026-09-20 (ADR-0012 §6) — obfuscation is REFUSED inside the kernel: no
+#    polymorphic or metamorphic behaviour, because it would break bit-exact replay, which
+#    is the headline claim. The goal behind the request is met differently (per-archetype
+#    weight tables that are not ABI, seed-derived variation within authored bands, Phase 6
+#    calibration), and anti-tamper stays host-side. miniKanren-style search is approved
+#    OFFLINE only (§7), in Idris2, gated like every other proof.
 # 7. OPEN 2026-09-20 — CI is RED AND NOT BROKEN: 23 of 27 runs on the private repo failed
 #    with zero steps executed ("recent account payments have failed or your spending limit
 #    needs to be increased"); every job reported steps: 0. The gates pass in a clean local
@@ -92,6 +99,8 @@ milestones = [
 
 [critical-next-actions]
 actions = [
+  "Phase 2 — a TLA+ instance of the mode transition relation, wired to a real gate: verification/proofs/tlaplus/StateMachine.tla is inherited scaffolding with no target behind it, and ADR-0012 says explicitly that this is NOT done",
+  "Phase 2 — the Idris2-typed relational core, offline only (ADR-0012 §7): first job is to re-find the t = 85 collision as a query, then hunt the next collision class before it moves a digest",
   "Phase 2 — steering: turn the INVESTIGATE direction into a path (this is where a remembered POSITION may finally earn its keep, and where Abi.Memory's bearing choice gets revisited)",
   "Phase 2 — open policy question recorded in ADR-0010 decision 6 and NOT settled: should an ammo-less agent with nothing in sight investigate a fresh lead, or reload? v0 investigates (digest-pinned); answering it means changing kernel, both rule modules and the pinned digest in one change",
   "Phase 2 — the utility graph is the place the next behaviours land: add a score (a behaviour against a visible contact) or widen candidates (a new kind of moment), never a branch in the middle of a chain",

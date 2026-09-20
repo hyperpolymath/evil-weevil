@@ -84,6 +84,15 @@ typedef uint32_t ee_status;
 /* Bits in ee_agent.flags. */
 #define EE_AGENT_FLAG_MEMORY_VALID 1u
 
+/* The mode field inside ee_agent.flags: bits 1..3 (ADR-0012). */
+#define EE_AGENT_MODE_SHIFT 1u
+#define EE_AGENT_MODE_MASK 14u
+#define EE_AGENT_MODE_ADVANCE 0u
+#define EE_AGENT_MODE_ENGAGE 1u
+#define EE_AGENT_MODE_EVADE 2u
+#define EE_AGENT_MODE_RELOAD 3u
+#define EE_AGENT_MODE_INVESTIGATE 4u
+
 /* Ticks a sighting stays actionable before the agent forgets it (Phase 2). */
 #define EE_MEMORY_TTL 36u
 

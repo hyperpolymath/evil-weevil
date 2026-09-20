@@ -49,6 +49,17 @@ forgetting properties; `src/core/kernel.zig` implements it; ADR-0009 records wha
 remembered (a bearing and an age, not a position), where it lives, and how it is
 checked.
 
+Phase 2 has also landed the control layer above the rule: modes plus a score margin
+(`src/interface/Abi/Modes.idr`, ADR-0012). An agent commits to a behaviour — engage,
+evade, reload, investigate, advance — and a challenger must beat the incumbent by more
+than 0.125 to take over. On the fixture this exists for, a contact at 40000 with health
+oscillating across the wound threshold, the graph alone changes its mind **99 times in
+100 ticks** and the committed agent **zero**; both readings were measured, not reasoned.
+The mode lives in three flag bits the freeze left undefined, so nothing in the layout
+moved and the ABI is still 1.0. Two digests moved, deliberately, and ADR-0006 carries
+their history — including the retirement of the v0-compat anchor, which was evidence
+about memory and cannot survive a change to the rule itself.
+
 Phase 2 has also landed the rule itself, rewritten as a utility graph
 (`src/interface/Abi/Utility.idr`, ADR-0010) without moving any of the three digests:
 the weights are the priorities the kernel was already reporting, and the one moment

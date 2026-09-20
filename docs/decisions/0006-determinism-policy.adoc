@@ -42,7 +42,7 @@ floating-point is pleasant, and the workbench wants to look smooth.
 Three facts about the shipped kernel that a reader of this ADR would otherwise have to
 infer from the code, recorded here because each will surprise somebody:
 
-1. **The digests are pinned in two places each, and there are three of them (Phase 2).**
+1. **The digests are pinned in two places each, and there are four of them (Phase 2).**
    `runTrace` folds every intent of a fixed fixture into one 64-bit number; both the Zig
    null host (`src/interface/ffi/test/null_host.zig`) and the C host
    (`tests/host/null_host.c`) assert the same numbers. Two hosts in two languages, one
@@ -53,10 +53,29 @@ infer from the code, recorded here because each will surprise somebody:
    [cols="3,1,2", options="header"]
    |===
    | What it pins | Value | Fixture
-   | The v0 rule with memory consulted | 14165495496352896129 | 10,000 ticks, `contact_count = tick %% 5`
-   | v0 with `MEMORY_VALID` cleared — the compatibility anchor | 4061121875253101873 | same fixture, flag cleared every tick
+   | The rule with memory consulted | 11339491356780309808 | 10,000 ticks, `contact_count = tick %% 5`
+   | The rule with `MEMORY_VALID` cleared | 1235117735680515552 | same fixture, flag cleared every tick
    | Perception memory end to end | 12283675074724005768 | "the one that got away": 30 ticks seen, 70 unseen, per 100
+   | Modes and the margin (VSM S2) | 5191914376283395890 | "the wounded duel": health oscillating across the wound threshold, contact at 40000
    |===
+
+   Five numbers in all, and their history is the record of every deliberate policy move:
+
+   [cols="1,1,1,2", options="header"]
+   |===
+   | Pin | Before | After | Why it moved
+   | 10,000-tick trace | 4061121875253101873 | 14165495496352896129 | memory wired in (ADR-0009): the fixture has zero-contact ticks, so the new branch fires inside it
+   | 10,000-tick trace | 14165495496352896129 | 11339491356780309808 | modes and the margin (ADR-0012): commitment changes which behaviour is in play at the boundaries
+   | memory-opted-out trace | 4061121875253101873 | 1235117735680515552 | the same change. THIS retired the v0-compat anchor: the number was evidence that memory was additive, and it cannot stay v0's number once the rule itself moves. The test is renamed, the claim is retired in place, and the pin lives on as "modes with memory opted out"
+   | chase fixture | 12283675074724005768 | unchanged | its contact is at 196608, beyond attack range, so no engage/evade boundary is reached and S2 has nothing to damp there
+   | the wounded duel | — | 5191914376283395890 | new fixture, new pin: the only scenario that reaches the boundary this slice exists for
+   |===
+
+   The S2 pin carries an extra assertion the others do not need, because its value is
+   not a behaviour but the ABSENCE of churn: both hosts also check that the action
+   changes zero times in 100 ticks. Measured both ways on the same fixture, the graph
+   alone switches 99 times and the committed rule zero — so the fixture can fail, and
+   the margin is doing the work rather than the fixture being quiet.
 
    The second row is why the first row's value moved in Phase 2 without anything being
    lost: the pre-Phase-2 pin was not retired, it was relabelled into a STRONGER assertion

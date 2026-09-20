@@ -245,6 +245,84 @@ fn runChaseTrace(seed: u64, ticks: usize) ChaseTrace {
     return out;
 }
 
+/// "The wounded duel": one contact at 40000 — inside attack range (65536) and inside
+/// flee range (131072) — with health oscillating across the wounded threshold (16384)
+/// every tick. This is the fixture the S2 layer exists for (ADR-0012): it is a moment
+/// where two behaviours are both legal and adjacent, so an uncommitted rule changes its
+/// mind every tick.
+fn flapSnapshot(tick: u64) abi.EeSnapshot {
+    const wounded = (tick % 2) == 1;
+    var s = snapshot(tick, 11, if (wounded) 16383 else 16384, FX * 3, 1);
+    s.contact0.id = 11;
+    s.contact0.bearing_cos = 16384;
+    s.contact0.bearing_sin = 8192;
+    s.contact0.distance = 40000;
+    s.contact0.threat = FX / 2;
+    return s;
+}
+
+const FlapTrace = struct {
+    digest: u64,
+    actions: [9]u32,
+    switches: u32, // times the ACTION changed from one tick to the next
+    mode_switches: u32, // times the MODE changed
+};
+
+fn runFlapTrace(seed: u64, ticks: usize) FlapTrace {
+    var ctx = context(seed, 0xFFFF_FFFF, 64);
+    var ag = agent(seed);
+    var out = FlapTrace{ .digest = 0, .actions = [_]u32{0} ** 9, .switches = 0, .mode_switches = 0 };
+    var prev_action: ?u32 = null;
+    var prev_mode: ?u32 = null;
+    var t: u64 = 0;
+    while (t < ticks) : (t += 1) {
+        const snap = flapSnapshot(t);
+        var intent = kernel.tick(&ctx, &snap, &ag);
+        kernel.degradeForCapabilities(&ctx, &intent);
+        if (intent.action < 9) out.actions[intent.action] += 1;
+        if (prev_action) |pa| {
+            if (pa != intent.action) out.switches += 1;
+        }
+        const m = kernel.modeOf(&ag);
+        if (prev_mode) |pm| {
+            if (pm != m) out.mode_switches += 1;
+        }
+        prev_action = intent.action;
+        prev_mode = m;
+        out.digest = out.digest *% 1099511628211 +% intent.action;
+        out.digest = out.digest *% 1099511628211 +% intent.target_id;
+        out.digest = out.digest *% 1099511628211 +% @as(u64, @bitCast(@as(i64, intent.move_x)));
+        out.digest = out.digest *% 1099511628211 +% intent.flags;
+        out.digest = out.digest *% 1099511628211 +% modeOfForDigest(&ag);
+    }
+    return out;
+}
+
+fn modeOfForDigest(ag: *const abi.EeAgent) u64 {
+    return @as(u64, kernel.modeOf(ag));
+}
+
+test "MODES: the wounded duel commits instead of flapping (ADR-0012)" {
+    const f = runFlapTrace(0xEE_0000_0000_0001, 100);
+    // MEASURED, both readings, on this fixture over 100 ticks:
+    //   without the margin (stickiness 0 = the graph alone): 99 action switches
+    //   with the margin (shipped):                               0 action switches
+    // The margin is what turns a coin-flip into a decision.
+    std.debug.print("FLAP switches={d} mode_switches={d} attack={d} flee={d} digest={d}\n", .{
+        f.switches,
+        f.mode_switches,
+        f.actions[abi.ACTION_ATTACK],
+        f.actions[abi.ACTION_FLEE],
+        f.digest,
+    });
+    try std.testing.expectEqual(@as(u32, 0), f.switches);
+    try std.testing.expectEqual(@as(u32, 100), f.actions[abi.ACTION_ATTACK]);
+    try std.testing.expectEqual(@as(u32, 0), f.actions[abi.ACTION_FLEE]);
+    try std.testing.expectEqual(@as(u32, 0), f.mode_switches);
+    // The same number is asserted by tests/host/null_host.c over the same fixture.
+    try std.testing.expectEqual(@as(u64, 5191914376283395890), f.digest);
+}
+
 test "10,000 ticks are bit-identical across two runs" {
     const first = runTrace(0xEE_0000_0000_0001, 10_000);
     const second = runTrace(0xEE_0000_0000_0001, 10_000);
@@ -257,26 +335,32 @@ test "the 10,000-tick digest matches the pinned value, and the C host agrees" {
     // between the kernel and its host-independent specification in Abi.Foreign, and
     // the thing a host adapter is allowed to rely on.
     //
-    // This number MOVED when Phase 2 wired memory in (from 4061121875253101873), and
-    // that is the deliberate change ADR-0006 demands rather than a surprise: the
-    // fixture has zero-contact ticks, so the new branch fires inside it. The old
-    // number did not disappear — it moved one test down, where it now asserts
-    // something stronger than it did before.
+    // This number has MOVED TWICE, both times deliberately, as ADR-0006 requires:
+    //   4061121875253101873  ->  14165495496352896129  memory wired in (ADR-0009)
+    //   14165495496352896129 ->  11339491356780309808  modes and the margin (ADR-0012)
+    // A digest that moves when policy changes is the mechanism working; a digest that
+    // moves without a recorded reason is the mechanism failing.
     const digest = runTrace(0xEE_0000_0000_0001, 10_000);
-    try std.testing.expectEqual(@as(u64, 14165495496352896129), digest);
+    try std.testing.expectEqual(@as(u64, 11339491356780309808), digest);
 }
 
-test "with the memory flag cleared, the trace is EXACTLY v0's — the compatibility claim, checked" {
-    // ADR-0009 says a host that never sets EE_AGENT_FLAG_MEMORY_VALID gets v0's
-    // behaviour, unchanged. That is a claim about a third-party host, so it is the
-    // one claim in the ADR that this repository cannot take on trust: here it is,
-    // against the digest v0 actually shipped.
-    const v0 = runTraceMode(0xEE_0000_0000_0001, 10_000, false);
-    try std.testing.expectEqual(@as(u64, 4061121875253101873), v0);
-
-    // ...and the two are not the same number, so the assertion above is not vacuous:
-    // memory IS consulted in the default configuration.
-    try std.testing.expect(runTrace(0xEE_0000_0000_0001, 10_000) != v0);
+test "with the memory flag cleared, memory is out of the loop — and the v0 number is RETIRED" {
+    // ADR-0009 asserted that a host which never sets EE_AGENT_FLAG_MEMORY_VALID gets
+    // v0's behaviour, and pinned 4061121875253101873 to prove it. THAT CLAIM IS NOW
+    // TRUE OF MEMORY AND FALSE OF THE KERNEL (ADR-0012): modes changed how the agent
+    // behaves on the same fixture, so clearing the memory flag no longer reproduces
+    // v0 — it reproduces "modes with memory opted out". The pin moved to
+    // 1235117735680515552 and is renamed, because a compat number that quietly starts
+    // measuring something else is worse than no compat number at all.
+    //
+    // The property that remains, and is what this test now checks:
+    //   1. the memory flag off gives a DIFFERENT trace from the memory flag on
+    //      (memory is genuinely in the loop), and
+    //   2. the trace is stable and pinned, so enabling or disabling memory stays a
+    //      deliberate, observable change rather than drift.
+    const without = runTraceMode(0xEE_0000_0000_0001, 10_000, false);
+    try std.testing.expectEqual(@as(u64, 1235117735680515552), without);
+    try std.testing.expect(runTrace(0xEE_0000_0000_0001, 10_000) != without);
 }
 
 test "the one that got away: investigate for exactly the TTL, then forget" {

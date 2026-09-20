@@ -67,6 +67,17 @@ pub const INTENT_FLAG_FROM_MEMORY = layout.INTENT_FLAG_FROM_MEMORY;
 pub const AGENT_FLAG_MEMORY_VALID = layout.AGENT_FLAG_MEMORY_VALID;
 pub const memory_ttl = layout.memory_ttl;
 
+// The agent's mode field, bits 1..3 of the same flags word (ADR-0012). Re-exported
+// for the reason learned the hard way in the memory slice: a constant the generator
+// emits is invisible to the kernel until the wrapper names it.
+pub const AGENT_MODE_SHIFT = layout.AGENT_MODE_SHIFT;
+pub const AGENT_MODE_MASK = layout.AGENT_MODE_MASK;
+pub const AGENT_MODE_ADVANCE = layout.AGENT_MODE_ADVANCE;
+pub const AGENT_MODE_ENGAGE = layout.AGENT_MODE_ENGAGE;
+pub const AGENT_MODE_EVADE = layout.AGENT_MODE_EVADE;
+pub const AGENT_MODE_RELOAD = layout.AGENT_MODE_RELOAD;
+pub const AGENT_MODE_INVESTIGATE = layout.AGENT_MODE_INVESTIGATE;
+
 // ── The ABI structs ─────────────────────────────────────────────────────────
 // `extern struct` gives C layout. Field order and types mirror Abi.Types exactly.
 

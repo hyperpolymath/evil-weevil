@@ -90,7 +90,11 @@ Three things had to be settled before any code could exist:
 
 5. **Two pinned digests, not one changed one.** The 10,000-tick v0 trace keeps
    4061121875253101873 and MUST keep it: it is the evidence that adding memory did
-   not alter v0's behaviour. Memory gets a second scenario — "the one that got
+   not alter v0's behaviour. (RETIRED 2026-09-20 by ADR-0012: the utility graph and
+   then modes changed the rule itself, so the kernel no longer reproduces v0 on that
+   fixture and cannot. The claim was true of MEMORY, which is what this ADR is about;
+   it is no longer true of the kernel, and the pin moved to 1235117735680515552 with
+   the test renamed. See ADR-0006's movement table.) Memory gets a second scenario — "the one that got
    away" — in which the only contact vanishes for seventy ticks out of every
    hundred, asserted by BOTH null hosts with its own pinned digest. Changing
    memory's behaviour changes that number, deliberately, in both hosts at once.

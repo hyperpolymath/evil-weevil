@@ -444,6 +444,56 @@ export
 agentFlagMemoryValidIsOne : Abi.Types.agentFlagMemoryValid = 1
 agentFlagMemoryValidIsOne = Refl
 
+||| Where the agent's MODE lives in the SAME flags word: bits 1..3 (ADR-0012). Bit 0
+||| was the only bit the freeze defined (ADR-0009); these three were left undefined,
+||| so Phase 2 puts the mode there rather than growing the struct. Three bits, five
+||| modes, three spare — an ABI that runs out of flag bits has to break its layout to
+||| grow, and that is a cost paid by every host.
+public export
+agentModeShift : Nat
+agentModeShift = 1
+
+public export
+agentModeMask : Nat
+agentModeMask = 14
+
+public export
+agentModeAdvance : Nat
+agentModeAdvance = 0
+
+public export
+agentModeEngage : Nat
+agentModeEngage = 1
+
+public export
+agentModeEvade : Nat
+agentModeEvade = 2
+
+public export
+agentModeReload : Nat
+agentModeReload = 3
+
+public export
+agentModeInvestigate : Nat
+agentModeInvestigate = 4
+
+export
+agentModeShiftIsOne : Abi.Types.agentModeShift = 1
+agentModeShiftIsOne = Refl
+
+export
+agentModeMaskIsFourteen : Abi.Types.agentModeMask = 14
+agentModeMaskIsFourteen = Refl
+
+||| The property that matters: the mask is seven shifted left by one, i.e. a MULTIPLE
+||| OF TWO, so bit 0 — `EE_AGENT_FLAG_MEMORY_VALID` — is outside it and a mode write
+||| cannot touch the memory flag. Stated as the multiplication rather than as
+||| `mod` 2 = 0 because `mod` does not reduce for a literal in this base, and a proof
+||| that does not reduce is not a proof.
+export
+agentModeMaskLeavesBitZeroAlone : Abi.Types.agentModeMask = 7 * 2
+agentModeMaskLeavesBitZeroAlone = Refl
+
 ||| How long a sighting stays actionable, in ticks. Six tenths of a second at
 ||| 60 Hz: long enough to keep pursuing somebody who stepped behind a pillar, short
 ||| enough that an agent does not walk to where a player stood ten seconds ago.
